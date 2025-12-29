@@ -22,7 +22,7 @@ Se desarrollaron índices propios para medir capacidades regionales utilizando:
 Se modelan los efectos de derrame (spillover) utilizando la librería splm y spdep.
 * **Paneles Espaciales:** Modelos Spatial Autoregressive Model (SAR) y Spatial Error Model (SEM) para controlar autocorrelación espacial (`spatialpaneldata.R`).
 Especificación:
-*$$ y = \rho W y + X \beta + \epsilon $$*
+*$$y = \rho W y + X \beta + \epsilon$$*
 Donde $W$ es la matriz de contigüidad espacial que captura la interacción entre regiones vecinas.
 
 * **Shift-Share Espacial:** Descomposición del crecimiento en componentes nacionales, sectoriales y competitivos locales (`shift_share.R`).
