@@ -39,9 +39,7 @@ Un modelo basado en agentes (ABM) para simular la emergencia de Trampas de Innov
 🚀 Instalación y Reproducción
 Prerrequisitos
 Este proyecto es híbrido. Asegúrate de tener instalados R 4.0+ y Python 3.9+.
-pip install -r requirements.txt
-# Librerías clave: pandas, numpy, inegipy, scikit-learn
-install.packages(c("tidyverse", "spdep", "splm", "rpart", "trelliscopejs"))
+Librerías clave: pandas, numpy, inegipy, scikit-learn, tidyverse, spdep, splm, rpart, trelliscopejs.
 ## 📊 Visualizaciones Destacadas
 
 <img width="5369" height="3540" alt="02_trayectorias_temporales (1)" src="https://github.com/user-attachments/assets/67a6ce05-fb05-4d11-95f6-db69c3f3e60d" />
