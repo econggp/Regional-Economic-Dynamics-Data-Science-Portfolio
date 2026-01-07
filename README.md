@@ -16,7 +16,7 @@ El repositorio sigue una arquitectura modular "Separation of Concerns" para gara
 
 ### 1. Construcción de Indicadores (Externalidades Cognitivas)
 Se desarrollaron índices propios para medir capacidades regionales utilizando:
-* `ARCI.ipynb`: Metodología para cuantificar flujos de conocimiento. Implementación del Análisis de Relaciones.
+* `ARCI.py`: Metodología para cuantificar flujos de conocimiento. Implementación del Análisis de Relaciones.
 
 ### 2. Análisis Econométrico Espacial
 Se modelan los efectos de derrame (spillover) utilizando la librería splm y spdep.
@@ -36,7 +36,7 @@ Segmentación del territorio mediante aprendizaje supervisado y no supervisado:
 Un modelo basado en agentes (ABM) para simular la emergencia de Trampas de Innovación.
   Agentes: Unidades económicas heterogéneas con capacidades de aprendizaje adaptativo.
   Dinámica: Evolución de la frontera tecnológica basada en interacciones locales.
-* `abm_regional_trampa_innovacion.ipynb`: Simulación de cómo la interacción local afecta la adopción tecnológica global.
+* `abm_regional_trampa_innovacion.py`: Simulación de cómo la interacción local afecta la adopción tecnológica global.
 
 🚀 Instalación y Reproducción
 Prerrequisitos
@@ -47,8 +47,8 @@ Librerías clave: pandas, numpy, inegipy, scikit-learn, tidyverse, spdep, splm, 
 <img width="5369" height="3540" alt="02_trayectorias_temporales (1)" src="https://github.com/user-attachments/assets/67a6ce05-fb05-4d11-95f6-db69c3f3e60d" />
 
 ✒️ Autor y Contacto
-[Gilberto González Pérez] Economista / Data Scientist
+[Gilberto González Pérez] Economists / Data Scientist
 
-Especialista en Análisis Regional y Sistemas Complejos.
+Especialista en análisis regional y sistemas complejos.
 
 LinkedIn: www.linkedin.com/in/gilberto-gonzález-pérez-a401b057
