@@ -16,7 +16,7 @@ El repositorio sigue una arquitectura modular "Separation of Concerns" para gara
 
 ### 1. Construcción de Indicadores (Externalidades Cognitivas)
 Se desarrollaron índices propios para medir capacidades regionales utilizando:
-* `ARCI.py`: Metodología para cuantificar flujos de conocimiento. Implementación del Análisis de Relaciones.
+* `arci.py`: Metodología para cuantificar flujos de conocimiento. Implementación del Análisis de Relaciones.
 
 ### 2. Análisis Econométrico Espacial
 Se modelan los efectos de derrame (spillover) utilizando la librería splm y spdep.
