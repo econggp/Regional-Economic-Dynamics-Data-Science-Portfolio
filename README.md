@@ -225,7 +225,7 @@ This work is licensed under the MIT License. If you use methodologies or code fr
 González Pérez, G. (2024). Analytical Architecture for Regional Economic Dynamics: Integration of Spatial Econometrics, Machine Learning, and Agent-Based Modeling. Code repository. 
 https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio
 
-## 📊 Visualizaciones Destacadas
+## 📊 Featured Views
 
 <img width="5369" height="3540" alt="02_trayectorias_temporales (1)" src="https://github.com/user-attachments/assets/67a6ce05-fb05-4d11-95f6-db69c3f3e60d" />
 
