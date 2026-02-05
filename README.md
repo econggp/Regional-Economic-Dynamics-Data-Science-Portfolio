@@ -145,14 +145,14 @@ Simulation: ABM calibration with empirical parameters → Policy scenarios
 ⚙️ Reproducibility Protocol
 
 # Clone repository
-git clone https://github.com/yourusername/Regional-Economic-Dynamics.git
+git clone https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio
 
 # Install environment (conda recommended)
 conda env create -f environment.yml
 
 install.packages(c("tidyverse", "spdep", "splm", "rpart", "trelliscopejs", "factoextra"))
 
-pip install -r requirements.txt  # Si existe, o
+pip install -r requirements.txt  #  or
 
 pip install pandas numpy scikit-learn mesa
 
@@ -222,7 +222,8 @@ Collaboration interests: Design of analytical frameworks for industrial policy, 
 
 📄 License and Citation
 This work is licensed under the MIT License. If you use methodologies or code from this repository in academic research or consulting reports, please cite:
-González Pérez, G. (2024). Analytical Architecture for Regional Economic Dynamics: Integration of Spatial Econometrics, Machine Learning, and Agent-Based Modeling. Code repository. https://github.com/[username]/regional-economic-dynamics
+González Pérez, G. (2024). Analytical Architecture for Regional Economic Dynamics: Integration of Spatial Econometrics, Machine Learning, and Agent-Based Modeling. Code repository. 
+https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio
 
 ## 📊 Visualizaciones Destacadas
 
