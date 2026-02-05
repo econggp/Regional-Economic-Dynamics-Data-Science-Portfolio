@@ -1,10 +1,25 @@
-# Regional-Economic-Dynamics-Data-Science-Portfolio
-Evidence-based analytics for investment decisions, supply chain resilience, and nearshoring strategy in Mexican manufacturing
+## Regional-Economic-Dynamics-Data-Science-Portfolio
+Evidence-Based Analytics for Investment Decisions, Supply Chain Resilience, and Nearshoring Strategy in Mexican Manufacturing
 
-💼 Executive Summary
-This portfolio demonstrates applied quantitative capabilities to solve strategic business challenges in Mexico's manufacturing sector. Each module delivers actionable intelligence for:
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![R](https://img.shields.io/badge/R-4.2%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Status](https://img.shields.io/badge/status-active-success)
 
-✅ Site selection & localization strategy: Identify municipalities with latent capabilities for automotive/electronics investment using spatial clustering and technological proximity metrics
+---
+
+## 📑 Table of Contents
+- [Executive Summary](#-executive-summary)
+- [Strategic Applications](#-strategic-applications-by-sector)
+- [Core Analytical Modules](#-core-analytical-modules)
+- [Data Pipeline](#-data-pipeline)
+- [Reproducibility Protocol](#-reproducibility-protocol)
+- [Strategic Engagement](#-strategic-engagement)
+
+## 💼 Executive Summary
+This portfolio showcases applied quantitative methods to address strategic business challenges in Mexico's manufacturing sector. Each module delivers actionable intelligence for:
+
+✅ Site selection & localization strategy: Identify federal entities/municipalities with latent capabilities for automotive/electronics investment using spatial clustering and technological proximity metrics
 
 ✅ Supply chain vulnerability mapping: Detect critical bottlenecks in input-output networks using structural decomposition of 7 official I-O matrices (1970–2018)
 
@@ -14,165 +29,139 @@ This portfolio demonstrates applied quantitative capabilities to solve strategic
 
 All analyses leverage official Mexican microdata (INEGI SCIAN, Encuesta Industrial  Anual, Censos Económicos, ENOE) with full reproducibility.
 
-🎯 Business Applications by Sector
+## 🎯 Strategic Applications by Sector
 
-| Sector | Strategic Question Addressed | Methodology Deployed |
-|--------|-----------------------------|----------------------|
-| **Automotive** | Where to locate Tier-1/Tier-2 facilities to maximize backward linkages with existing clusters? | Spatial panel econometrics (SAR/SEM) + technological proximity networks |
-| **Energy** | How to evaluate infrastructure investment under regulatory uncertainty? | Monte Carlo simulation + real options framework (PEMEX-Schlumberger case) |
-| **Nearshoring** | Which states/municipalities offer highest ROI for U.S.-relocated production? | Shift-share decomposition + cognitive externalities index (2003–2023) |
-| **Workforce Strategy** | What skills gaps emerge during Industry 4.0 transition? | Labor market dynamics modeling + occupational task analysis (ABM) |
+| Sector | Strategic Question | Methodology | Business Output |
+|--------|-------------------|-------------|-----------------|
+| **Automotive** | Where to locate Tier-1/Tier-2 for maximum backward linkages? | Spatial SAR/SEM + proximity networks | Ranked map of 32 entities by linkage elasticity (+28% vs. baseline) |
+| **Energy** | How to evaluate infrastructure under regulatory uncertainty? | Monte Carlo + Real Options (PEMEX-Schlumberger framework) | Investment prioritization matrix with strategic flexibility values |
+| **Nearshoring** | Which regions offer highest ROI for U.S. relocation? | Shift-share + Cognitive Externalities Index (2003-2023) | Municipal scoring model with capability-complementarity metrics |
+| **Workforce 4.0** | What skill gaps emerge during automation transition? | ABM labor dynamics + occupational task analysis | 2025-2035 forecast of at-risk occupations by region |
 
-🚗 Automotive Sector
-Problem: Identification of optimal locations for suppliers in the automotive value chain.
+### Example: Automotive Localization Intelligence
+**Challenge**: Identifying optimal supplier locations beyond obvious clusters (Querétaro, Puebla).  
+**Analytical Approach**: 
+- Spatial Durbin Model to quantify technological spillovers from existing OEMs
+- Network analysis of input-output backward linkages (2018 I-O matrix)
+- Clustering of municipalities by latent capability (patenting, skill density, logistics access)
 
-Method: Spatial models capturing technological spillovers between regions and industrial proximity network analysis.
+**Deliverable**: Interactive dashboard ranking 245 municipalities into 5 tiers:
+- **Tier 1**: Immediate readiness (existing ecosystem density)
+- **Tier 2**: High potential (cognitive proximity to clusters)
+- **Tier 3**: Emerging (infrastructure gaps closing)
+- **Tier 4**: Latent (skill endowment, policy-dependent)
+- **Tier 5**: High risk (innovation trap trajectory)
 
-Result: Mapping of clusters with the highest potential to generate productive backward linkages.
+## 🔑 Core Analytical Modules
 
-⚡ Energy Sector
-Problem: Evaluation of infrastructure projects in contexts of high regulatory uncertainty.
+### 1. Spatial Intelligence Engine
+**Files**: `spatialpaneldata.R`, `shift_share.R`
 
-Method: Scenario simulation via Monte Carlo and real options valuation.
+Quantifies spillover effects across 32 federal entities and 19 sectors using contiguity matrices (W) and spatial autoregressive specifications.
 
-Result: Analytical framework for prioritizing investments considering strategic flexibility.
+**Spatial Durbin Model (SDM)**:
+$$y_{it} = \rho W y_{it} + X_{it}\beta + W X_{it}\theta + \mu_i + \lambda_t + \varepsilon_{it}$$
 
-🌎 Nearshoring and Relocation
-Problem: Identification of regions with the highest potential to attract investment due to the relocation of operations from the U.S.
+| Parameter | Executive Interpretation |
+|-----------|-------------------------|
+| ρ (rho) | Contagion intensity: How much neighboring regions' performance affects local outcomes |
+| θ (theta) | Policy spillover: Impact of neighboring regions' R&D incentives on local investment |
+| W | Row-standardized spatial weights matrix (queen contiguity at municipal level) |
 
-Method: Extended shift-share decomposition with regional cognitive capabilities indicators.
+**Decision Support Output**: 
+- Elasticity of capability accumulation with respect to neighboring industrial density
+- Critical agglomeration thresholds (minimum ecosystem size for sustainable growth)
+- Identification of "shadow effect" regions (negatively impacted by neighbor competition vs. spillovers)
 
-Result: Municipal ranking by potential ROI based on existing capabilities and complementarities.
+---
 
-👥 Labor Transition (Industry 4.0)
-Problem: Prospective analysis of skill gaps during the adoption of 4.0 technologies.
+### 2. Cognitive Externalities Index
+**Files**: `arci.py`, `indices_censos.py`
 
-Method: Agent-based models simulating labor market evolution under different technological scenarios.
+Proprietary algorithm measuring regional knowledge-diffusion capacity through:
+- Technological capability accumulation patterns (alternative index)
+- Labor skill density gradients (share of engineering/technical workforce)
+- Inter-firm learning proximity (sectoral co-location of related industries)
 
-Result: Identification of at-risk occupations and design of anticipatory training policies.
+**Business Application**: Innovation Readiness Index (0-100) for site selection and investment timing decisions.
 
-🔑 Core Analytical Modules
-*  Spatial Intelligence Engine (spatialpaneldata.R, shift_share.R)
+---
 
-     Quantifies spillover effects across 32 federal entities and 19 productive sectors using contiguity matrices (W) and spatial autoregressive specifications:
+### 3. Industrial Recomposition Tracker
+**Files**: `conglomerados.R`, `arbol_clasificacion_regional.R`
 
-     Spatial Durbin Model: Captures direct + indirect (neighbor) effects
+Hybrid ML approach combining interpretability with predictive power:
 
-     y_it = ρ·W·y_it + X_it·β + W·X_it·θ + μ_i + λ_t + ε_it
+| Algorithm | Purpose | Output |
+|-----------|---------|--------|
+| CART (`rpart`) | Classification rules | Decision trees for R&D subsidy targeting (High/Medium/Low/Trap capability classes) |
+| K-means + PCA | Pattern discovery | 5 strategic archetypes with benchmarking peer groups |
 
-     **Output for decision-making**: Elasticity of capacity accumulation with respect
-     to neighboring industrial density; identification of critical agglomeration
-     thresholds.
+**Regional Archetypes**:
+- **Alpha**: High-tech manufacturing hubs (Querétaro, Aguascalientes) — Mature ecosystems
+- **Beta**: Emerging nearshoring destinations (Guanajuato, SLP) — Growth trajectory  
+- **Gamma**: Legacy clusters at risk — Obsolescence warning indicators
+- **Delta**: Latent potential zones — Untapped skill endowments, infrastructure gaps
+- **Omega**: Low-value traps — Require intervention to avoid path dependency
 
-*  Cognitive Externalities Index (arci.py, índices_censos.py)
+---
 
-     Proprietary algorithm measuring knowledge diffusion capacity through:
-     technological capabilities accumulation patterns  intensity
-     stratification by sector/municipality (arcy.py) or federal entities/sector
-     (índices_censos.py) and labor skill density gradients
+### 4. Innovation Trap Simulator
+**File**: `abm_regional_trampa_innovacion.py`
 
-     **Business Impact**: A regional Innovation Readiness Index to inform strategic
-     site selection and investment decisions.
+Agent-based model overcoming limitations of representative models by capturing **micro-heterogeneity** and **non-linearities** in technological learning.
 
-*  Industrial Recomposition Tracker (conglomerados.R, árbolclasificación_regional.R)
+**Agent Architecture**:
+- **Attributes**: Human capital stock, absorptive capacity, cognitive proximity to frontier
+- **Decision Rule**: Adaptive learning under bounded rationality — agents below capability threshold adopt low-value technologies (lock-in), above threshold invest in R&D (leapfrog)
+- **Network Structure**: Geographic proximity + technological distance (non-geodesic interactions)
 
-     Hybrid approach: Interpretable algorithms for deriving policy allocation rules:
-     CART (`rpart`): Technology capability class (High/Medium/Low/Trap). Decision rules
-     for targeting R&D subsidies
+**Scenario Testing**:
+- Selective vs. universal R&D subsidies
+- FDI shock absorption in low-density ecosystems  
+- Policy intervention timing (ex-ante capability building vs. ex-post rescue)
 
-     K-means + Ward: Multidimensional profiles. Identification of "peer regions" for
-     benchmarking
+**Deliverable**: Interactive policy simulation dashboard for "Regional Innovation Trap Dynamics" under varying economic conditions.
 
-     Unsupervised clustering (k-means + PCA) + classification trees (rpart) to segment
-     territories into 5 strategic archetypes:
+## 📊 Data Pipeline (Mexico 2004-2025)
 
-     Cluster A: High-tech manufacturing hubs (Querétaro, Aguascalientes)
+<img width="2369" height="2049" alt="deepseek_mermaid_20260205_a4ddbd" src="https://github.com/user-attachments/assets/aa95dc72-42bb-47ca-b666-320e04d0311b" />
 
-     Cluster B: Emerging nearshoring destinations (Guanajuato, San Luis Potosí)
+Execution Pipeline:
 
-     Cluster C: Legacy clusters at risk of obsolescence
+* Step 1: Data processing and index construction
+python arci.py indices_censos.py
 
-     Cluster D: Latent potential zones (untapped labor/skill endowments)
+* Step 2: Spatial econometric analysis
+Rscript spatialpaneldata.R
 
-     Cluster E: Low-value traps requiring policy intervention
+* Step 3: Regional classification
+Rscript conglomerados.R
 
-     **Business output**: Dynamic typology dashboards for portfolio diversification
-     strategy.
+* Step 4: Innovation dynamics simulation
+python abm_regional_trampa_innovacion.py
 
-*  Innovation Trap Simulator (abm_regional_trampa_innovacion.py)
-     Agent-based model simulating how local interactions produce path dependencies:
+## ⚙️ Reproducibility Protocol
 
-    Core mechanism: Adaptive learning under bounded rationality
-   
-    if agent.capability < threshold:
-   
-        agent.adopts_low_value_tech()  # Lock-in dynamic
-   
-    else:
-   
-        agent.invests_in_R&D()         # Leapfrog opportunity
-
-   **Purpose**: To overcome the limitations of representative models in capturing
-   **micro-heterogeneity** and **nonlinearities** in technological learning processes.
-
-   **Model Architecture**:
-   
-      - **Agents**: Firms with attributes such as human capital, absorptive capacity,
-        and cognitive proximity
-        
-      - **Space**: Geographic network with technological distances (not just geodesic)
-        
-      - **Dynamics**: Diffusion, adoption, and potential lock-in processes in
-        suboptimal trajectories
-
-   **Simulated Scenarios**: Impact of selective vs. universal subsidies; effect of FDI
-   shocks in low-technology-density ecosystems.
-
-   **Key Deliverable**: A dynamic, interactive policy simulation dashboard for
-   visualizing Regional Innovation Trap Dynamics" under varying economic conditions and
-   intervention scenarios.
-
-Data Pipeline (Mexico 2004-2025)
-
-Intake: Annual Survey of Manufacturing Companies (INEGI) + DENUE + I-O Matrices
-
-Transformation: Regional normalization, spatial deflation, W-matrix construction
-
-Modeling: Spatial panel estimation → Spatial cross-validation → Machine learning classification
-
-Simulation: ABM calibration with empirical parameters → Policy scenarios
-
-⚙️ Reproducibility Protocol
-
+```
 # Clone repository
 git clone https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio
 
-# Install environment (conda recommended)
-conda env create -f environment.yml
+# Python environment
+conda create -n red python=3.10 && conda activate red
+pip install -r requirements.txt
 
-install.packages(c("tidyverse", "spdep", "splm", "rpart", "trelliscopejs", "factoextra"))
-
-pip install -r requirements.txt  #  or
-
-pip install pandas numpy scikit-learn mesa
-
-# Execute analysis pipeline
-
-python arci.py, índices_censos.py        # Cognitive externalities index
-
-Rscript spatialpaneldata.R  # Spatial econometrics
-
-Rscript conglomerados.R     # Regional typology
-
-python abm_regional_trampa_innovacion.py  # Simulation
+# R packages 
+install.packages(c("spdep", "splm", "rpart"))
+```
 
 Data sources: Official INEGI matrices (1970, 1975, 1978, 1980, 2003, 2005, 2013, 2018), SCIAN industrial surveys, Encuesta Nacional de Ocupación y Empleo, Censos Económicos (2004, 2009, 2014, 2019, 2025).
 
-🤝 Strategic Engagement
+## 🤝 Strategic Engagement
 
 This portfolio supports three engagement models for private sector clients:
 
-## 📋 Engagement Models
+ 📋 **Engagement Models**
 
 | Engagement Type | Deliverable | Timeline |
 |-----------------|-------------|----------|
@@ -182,7 +171,7 @@ This portfolio supports three engagement models for private sector clients:
 
 *Note: Deliverables are tailored to specific sectoral needs and data availability. All analyses include executive summaries and actionable policy recommendations.*
 
-💼 Applications in Consulting and Applied Research
+## 💼 Applications in Consulting and Applied Research
 
 | Project                                                    | Role                                   | Methodology Applied                     | Deliverable                                                  |
 | ---------------------------------------------------------- | -------------------------------------- | --------------------------------------- | ------------------------------------------------------------ |
@@ -195,37 +184,33 @@ This portfolio supports three engagement models for private sector clients:
 * **Python:** Data processing (Pandas), Simulation (Agent-Based Modeling).
   
 * **R:** Spatial Statistics (`spdep`, `splm`), Classification (`rpart`) and Clustering.
+
+* **Data Sources**: INEGI API, DENUE, Censos Económicos
   
-![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
+* **Visualization**: ggplot2, plotly, dash, Tableau integration
 
-![R Version](https://img.shields.io/badge/R-4.2%2B-blue)
+## 📬 Professional Contact
 
-![Status](https://img.shields.io/badge/status-active-success)
+**Dr. Gilberto González Pérez**
+Economist | Economic Data Scientist | Industrial Strategy Consultant
 
-![License](https://img.shields.io/badge/license-MIT-green)
+| Contact Method | Details |
+|----------------|---------|
+| 📧 Email | econggp@gmail.com | 
+| 📧 Academic Email | ggonzalez@correo.xoc.uam.mx |
+| 💼 LinkedIn | [Profile](https://www.linkedin.com/in/gilberto-gonz%C3%A1lez-p%C3%A9rez-a401b057) |
+| 📍 Location | Mexico City |
+| 🎓 Credentials | PhD Economics (UAM), Postdoc (UNAM) |
 
-📬 Professional Contact
+**Availability:** Strategic consulting, industrial policy advising, applied research collaborations
 
-Dr. Gilberto González Pérez
+**Collaboration Interests:** Analytical frameworks for industrial policy, global value chain modeling, technological shock impact assessment on emerging labor markets.
 
-Economist | Economic Data Scientist | Industrial Strategy Consultant | UAM Doctorate | UNAM Postdoc
-
-Email: econggp@gmail.com | ggonzalez@correo.xoc.uam.mx
-
-LinkedIn: linkedin.com/in/gilberto-gonzález-pérez-a401b057
-
-Location: Mexico City
-
-Availability: Strategic consulting, industrial policy advising, applied research collaborations
-
-Collaboration interests: Design of analytical frameworks for industrial policy, modeling of global value chains, impact assessment of technological shocks on emerging labor markets.
-
-📄 License and Citation
+## 📄 License and Citation
 This work is licensed under the MIT License. If you use methodologies or code from this repository in academic research or consulting reports, please cite:
-González Pérez, G. (2024). Analytical Architecture for Regional Economic Dynamics: Integration of Spatial Econometrics, Machine Learning, and Agent-Based Modeling. Code repository. 
-https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio
+González Pérez, G. (2024). Analytical Architecture for Regional Economic Dynamics: Integration of Spatial Econometrics, Machine Learning, and Agent-Based Modeling. Code repository: https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio
 
 ## 📊 Featured Views
-
+Regional Innovation Trajectories (2003-2063)
 <img width="5369" height="3540" alt="02_trayectorias_temporales (1)" src="https://github.com/user-attachments/assets/67a6ce05-fb05-4d11-95f6-db69c3f3e60d" />
 
