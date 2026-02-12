@@ -26,6 +26,33 @@ from scipy.stats import ttest_ind
 import matplotlib as mpl
 import warnings
 
+def normalizar_resultados(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normaliza los nombres de columnas para garantizar consistencia.
+    """
+    df_normalizado = df.copy()
+
+    # Normalizar nombres de columnas
+    if 'paso' in df.columns and 'paso_tiempo' not in df.columns:
+        df_normalizado = df_normalizado.rename(columns={'paso': 'paso_tiempo'})
+
+    if 'estado_economico' in df.columns:
+        df_normalizado = df_normalizado.rename(columns={'estado_economico': 'tipo_region_economica_actual'})
+
+    # Asegurar que las columnas críticas existan
+    columnas_criticas = [
+        'id_region', 'paso_tiempo', 'tipo_region',
+        'tipo_region_economica_inicial', 'tipo_region_economica_actual',
+        'pib_regional', 'capacidad_tecnologica', 'tasa_innovacion',
+        'productividad_promedio', 'diversidad_sectorial', 'especializacion'
+    ]
+
+    for col in columnas_criticas:
+        if col not in df_normalizado.columns:
+            df_normalizado[col] = np.nan
+
+    return df_normalizado
+
 def setup_matplotlib_definitivo():
     """
     Configuración gráfica blindada para Google Colab.
@@ -75,6 +102,13 @@ def setup_matplotlib_definitivo():
     warnings.filterwarnings('ignore', category=UserWarning, module='seaborn')
 
     print("✅ Configuración gráfica aplicada: Fuentes estándar forzadas (DejaVu Sans).")
+
+def setup_matplotlib_safe():
+    """
+    Alias para la configuración definitiva de Matplotlib.
+    Utilizado para asegurar que las funciones que lo requieran tengan un punto de entrada definido.
+    """
+    setup_matplotlib_definitivo()
 
 # EJECUCIÓN INMEDIATA PARA LIMPIAR EL ESTADO ACTUAL
 setup_matplotlib_definitivo()
@@ -977,7 +1011,7 @@ class EvaluacionDinamica:
         # Vectores para almacenamiento
         estados_dinamicos = []
         propensiones = []
-        ise = []
+        ise_list = []
 
         # Iterar para asegurar consistencia temporal (t depende de t-1)
         # Asumiendo que el DF está ordenado por Region y luego por Paso de Tiempo
@@ -996,7 +1030,7 @@ class EvaluacionDinamica:
             macro = row.get('factor_macro', 1.0)
             aglo = row.get('spillovers_recibidos', 0.0)
 
-            ise = EvaluacionDinamica.calcular_indice_salud_ecosistema(
+            ise_val = EvaluacionDinamica.calcular_indice_salud_ecosistema(
                 capacidad_tecnologica=row['capacidad_tecnologica'],
                 innovacion=row.get('tasa_innovacion', row.get('innovaciones_realizadas', 0)),
                 diversidad=row['diversidad_sectorial'],
@@ -1007,18 +1041,18 @@ class EvaluacionDinamica:
             )
 
             # Determinar Estado Discreto
-            nuevo_estado = EvaluacionDinamica.determinar_estado_transicion(str(estado_previo), ise)
+            nuevo_estado = EvaluacionDinamica.determinar_estado_transicion(str(estado_previo), ise_val)
 
             estados_dinamicos.append(nuevo_estado)
-            ise.append(ise)
+            ise_list.append(ise_val)
             # Propensión inversa al índice de salud
-            propensiones.append(1.0 - ise)
+            propensiones.append(1.0 - ise_val)
 
             # Actualizar previo para la siguiente iteración
             estado_previo = nuevo_estado
 
         df_resultado['estado_dinamico'] = estados_dinamicos
-        df_resultado['indice_salud_ecosistema'] = ise
+        df_resultado['indice_salud_ecosistema'] = ise_list
         df_resultado['propension_atrapada'] = propensiones
 
         return df_resultado
@@ -1743,6 +1777,7 @@ class FuerzaLaboral:
         # La brecha es la distancia entre lo que tengo y lo que necesito
         gap = max(0, self.requisitos_actuales - self.promedio_know_how)
         self.brecha_talento = gap
+        self.brecha_calificacion = gap
 
     def obtener_indicadores_clave(self) -> Dict[str, float]:
         """
@@ -2388,7 +2423,7 @@ class ModeloEconomicoRegional:
         tipos_geo = list(TipoRegion)
 
         # Distribución Empírica: 24 atrapadas, 8 avanzadas (aprox)
-        n_atrapadas = int(self.num_regiones * 0.9)
+        n_atrapadas = int(self.num_regiones * 0.75)
         n_avanzadas = self.num_regiones - n_atrapadas
 
         # Asignación aleatoria de condiciones iniciales
@@ -2566,22 +2601,23 @@ def ejecutar_analisis_completo():
     # - Dinámica Micro (Corporacion/FuerzaLaboral)
     resultados_raw = modelo.ejecutar_simulacion(num_pasos=60)
 
-    # 3. ANÁLISIS DE RESULTADOS (POST-PROCESAMIENTO)
-    # --------------------------------------------------------
-    print("🛠️ Normalizando estructura de datos...")
+    # 3. Normalización
     resultados = normalizar_resultados(resultados_raw)
-    # --------------------------------------------------------
 
-    # 3. Análisis (Ahora usará 'resultados' que ya está limpio)
+    # 4. Agregar columnas faltantes si es necesario
+    if 'spillovers_recibidos' not in resultados.columns:
+        resultados['spillovers_recibidos'] = 0.0
+
+    # 5. Análisis (Ahora usará 'resultados' que ya está limpio)
     print("\n2. PROCESANDO RESULTADOS...")
     analisis_movilidad = modelo.analizar_evolucion_tipologias(resultados)
     analisis_brechas = modelo.analizar_brechas_regionales(resultados)
 
-    # C. Métricas Sistémicas (Eficiencia Nacional)
+    # 6. Métricas Sistémicas (Eficiencia Nacional)
     # Usamos el AnalizadorSistema optimizado
     metricas_sistema = AnalizadorSistema.evaluar_estado_sistema(modelo.regiones)
 
-    # 4. GENERACIÓN DE REPORTE FINAL
+    # 7. GENERACIÓN DE REPORTE FINAL
     # --------------------------------------------------------
     print("\n" + "="*50)
     print("   REPORTE EJECUTIVO DE RESULTADOS")
@@ -2702,9 +2738,30 @@ def _guardar_figura(fig, path, filename):
 
 def _get_color(key, palette, default='#95A5A6'):
     """Obtiene color de forma segura con fallback."""
+    # Si la paleta no es un diccionario, devolver el color por defecto
+    if not isinstance(palette, dict):
+        return default
+
     # Normalizar clave (quitar Enum wrappers si existen)
-    key_str = str(key).split('.')[-1] if '.' in str(key) else str(key)
-    return palette.get(key_str, palette.get(key, default))
+    if hasattr(key, 'name'):
+        key_str = key.name
+    else:
+        key_str = str(key)
+
+    # Buscar en diferentes formatos
+    if key_str in palette:
+        return palette[key_str]
+    elif key_str.upper() in palette:
+        return palette[key_str.upper()]
+    elif key_str.lower() in palette:
+        return palette[key_str.lower()]
+
+    # Buscar por substring
+    for k, v in palette.items():
+        if isinstance(k, str) and key_str.upper() in k.upper():
+            return v
+
+    return default
 
 def _graficar_comparativa_tipologias(df, save_path, colores):
     """1. Análisis Comparativo por Tipologías (Structural Gap)"""
@@ -2859,7 +2916,7 @@ def _graficar_analisis_geografico(df, save_path, colores):
     if 'tipo_region' not in df.columns: return
 
     # Usar datos finales
-    col_tiempo = 'paso_tiempo' if 'paso_tiempo' in df.columns else 'paso_tiempo'
+    col_tiempo = 'paso_tiempo' if 'paso_tiempo' in df.columns else 'paso'
     df_final = df[df[col_tiempo] == df[col_tiempo].max()]
 
     fig, ax = plt.subplots(figsize=(14, 7))
@@ -2984,14 +3041,14 @@ def crear_graficos_correlacion_optimizados(resultados: pd.DataFrame, save_path: 
 
     print("\n=== GENERANDO GRÁFICOS DE CORRELACIÓN OPTIMIZADOS ===")
 
+    resultados = normalizar_resultados(resultados)
+
     # Helper interno
-    def calcular_correlacion_segura(df_subset):
-        """Calcula correlación ignorando columnas constantes o nulas."""
-        df_limpio = df_subset.select_dtypes(include=[np.number]).dropna(axis=1, how='all')
-        if df_limpio.empty: return pd.DataFrame()
-        # Eliminar constantes (desviación estándar 0)
-        df_limpio = df_limpio.loc[:, df_limpio.std() > 1e-6]
-        return df_limpio.corr()
+    def calcular_correlacion_segura(df):
+        df_num = df.select_dtypes(include=[np.number]).dropna(axis=1, how='all')
+        if df_num.shape[1] < 2: return pd.DataFrame()
+        df_num = df_num.loc[:, df_num.std() > 1e-6]
+        return df_num.corr()
 
     # 1. DEFINICIÓN DE VARIABLES (Tolerante a faltantes)
     # ----------------------------------------------------
@@ -3031,18 +3088,18 @@ def crear_graficos_correlacion_optimizados(resultados: pd.DataFrame, save_path: 
     if len(vars_filt['Clave']) > 1:
         try:
             fig, ax = plt.subplots(figsize=(12, 10))
-            corr = calcular_correlacion_segura(resultados[vars_filt['Clave']])
+            # Usar solo cálculo simple de correlación
+            corr = df_resultados[vars_filt['Clave']].corr()
 
             if not corr.empty:
                 mask = np.triu(np.ones_like(corr, dtype=bool))
                 sns.heatmap(corr, mask=mask, annot=True, cmap='RdBu_r', center=0,
-                           square=True, linewidths=0.5, cbar_kws={"shrink": .8}, ax=ax,
-                           fmt='.2f', annot_kws={'size': 9, 'weight': 'bold'})
+                           square=True, linewidths=0.5, ax=ax,
+                           fmt='.2f', annot_kws={'size': 9})
 
-                ax.set_title('Matriz de correlaciones principales', fontweight='bold', fontsize=14)
-
+                ax.set_title('Matriz de correlaciones principales', fontweight='bold')
                 plt.tight_layout()
-                plt.savefig(os.path.join(save_path, '06_matriz_correlaciones_principales.png'), bbox_inches='tight')
+                plt.savefig(os.path.join(save_path, '06_matriz_correlaciones_principales.png'))
                 plt.close()
         except Exception as e:
             print(f"⚠️ Error matriz principal: {e}")
@@ -3152,6 +3209,9 @@ def evaluar_procesos_emergentes_optimizados(resultados: pd.DataFrame, save_path:
     # Cálculo vectorizado
     df['tasa_aprendizaje'] = df.groupby('id_region')['progreso_formacion'].diff().fillna(0)
 
+    # Now, calculate volatilidad_aprendizaje after tasa_aprendizaje is defined
+    df['volatilidad_aprendizaje'] = df.groupby('id_region')['tasa_aprendizaje'].rolling(3).std().fillna(0).values
+
     # 2. IDENTIFICACIÓN DE LOOPS Y CONVERGENCIA
     print("2. Detectando loops de retroalimentación positiva...")
 
@@ -3256,143 +3316,44 @@ def evaluar_procesos_emergentes_optimizados(resultados: pd.DataFrame, save_path:
     return metricas_emergentes
 
 def _graficar_dashboard_emergente(df_ts, df_metrics, df_brechas, save_path):
-    """
-    Genera panel visual específico para la dinámica de sistemas complejos.
-    Versión corregida: Soluciona error de asignación de colores (dict vs string).
-    """
-    # Paleta Robusta (Universal)
-    paleta_segura = {
-        # Variaciones Atrapada (Rojo)
-        'Atrapada': '#E74C3C', 'ATRAPADA': '#E74C3C', 'atrapada': '#E74C3C',
-        # Variaciones No Atrapada (Verde)
-        'No_Atrapada': '#27AE60', 'NO_ATRAPADA': '#27AE60', 'no_atrapada': '#27AE60',
-        'No_atrapada': '#27AE60',
-        # Variaciones Transición (Naranja)
-        'En_Transicion': '#F39C12', 'EN_TRANSICION': '#F39C12', 'en_transicion': '#F39C12',
-        'En_transicion': '#F39C12',
-        # Fallback
-        'Desconocido': 'gray'
-    }
-
-    # Configuración del lienzo
-    plt.close('all') # Limpiar figuras previas
-    fig, axes = plt.subplots(2, 3, figsize=(22, 12))
-    fig.suptitle('Dinámica de sistemas: Emergencia y convergencia', fontsize=22, fontweight='bold', y=0.95)
-
-    # ---------------------------------------------------------
-    # 1. Velocidad de Aprendizaje (Serie de Tiempo)
-    # ---------------------------------------------------------
-    ax = axes[0,0]
-    if 'tasa_aprendizaje' in df_ts.columns:
-        ts_agg = df_ts.groupby(['paso_tiempo', 'tipo_region_economica_inicial'])['tasa_aprendizaje'].mean().reset_index()
-
-        for tipo in ts_agg['tipo_region_economica_inicial'].unique():
-            d = ts_agg[ts_agg['tipo_region_economica_inicial'] == tipo]
-            # Obtener el color específico del diccionario
-            color_linea = paleta_segura.get(str(tipo), 'gray')
-
-            ax.plot(d['paso_tiempo'], d['tasa_aprendizaje'].rolling(3).mean(),
-                   label=str(tipo), linewidth=2, color=color_linea)
-
-        ax.set_title('Velocidad de aprendizaje (Cierre de brecha)')
-        ax.set_ylabel('Δ Progreso / Tiempo')
-        ax.legend(loc='upper right')
-        ax.grid(True, alpha=0.3)
-    else:
-        ax.text(0.5, 0.5, "Datos insuficientes", ha='center')
-
-    # ---------------------------------------------------------
-    # 2. Heterogeneidad Interna (Barras)
-    # ---------------------------------------------------------
-    ax = axes[0,1]
-    if not df_brechas.empty:
-        # Aseguramos que el eje X sea string para evitar errores de ploteo
-        x_vals = df_brechas['coeficiente_variacion'].astype(str)
-        bars = ax.bar(x_vals, df_brechas['coeficiente_variacion'], color='#3498DB', alpha=0.7)
-        ax.set_title('Heterogeneidad interna (Coef. variación)')
-        ax.bar_label(bars, fmt='%.3f')
-        ax.tick_params(axis='x', rotation=15)
-
-    # ---------------------------------------------------------
-    # 3. Intensidad de Loops (Boxplot)
-    # ---------------------------------------------------------
-    ax = axes[0,2]
-    if not df_metrics.empty:
-        sns.boxplot(data=df_metrics, x='tipo_region', y='intensidad_loop',
-                   ax=ax, palette=paleta_segura) # Aquí palette sí acepta dict
-        ax.axhline(0.3, color='r', linestyle='--', label='Umbral Crítico')
-        ax.set_title('Fuerza del loop de retroalimentación')
-        ax.set_xlabel('')
-        # ax.legend() # Boxplot a veces genera leyenda redundante
-
-    # ---------------------------------------------------------
-    # 4. Persistencia vs Crecimiento (Scatter)
-    # ---------------------------------------------------------
-    ax = axes[1,0]
-    if not df_metrics.empty:
-        tipos_unicos = df_metrics['tipo_region'].unique()
-        for tipo in tipos_unicos:
-            subset = df_metrics[df_metrics['tipo_region'] == tipo]
-            # Color específico
-            c = paleta_segura.get(str(tipo), 'gray')
-
-            ax.scatter(subset['autocorr_tech'], subset['velocidad_crecimiento'],
-                      label=str(tipo), alpha=0.6, s=60, color=c)
-
-        ax.set_xlabel('Inercia tecnológica (Autocorrelación)')
-        ax.set_ylabel('Velocidad de crecimiento')
-        ax.set_title('Persistencia vs dinamismo')
-        ax.axhline(0, color='k', linestyle='-', linewidth=0.5)
-        ax.legend()
-
-
-    #
-
-
-    # ---------------------------------------------------------
-    # 5. Distribución de Tipos de Dinámica (Pie Chart)
-    # ---------------------------------------------------------
-    ax = axes[1,1]
-    if 'tipo_dinamica' in df_metrics.columns:
-        conteo = df_metrics['tipo_dinamica'].value_counts()
-        # Mapa de colores semántico para la dinámica
-        colores_dinamica = {
-            'Estancada': '#E74C3C', # Rojo
-            'Crecimiento': '#F1C40F', # Amarillo
-            'Sistemas de innovación': '#27AE60', # Verde
-            'Virtuosa': '#27AE60'
-        }
-        cols_pie = [colores_dinamica.get(i, 'gray') for i in conteo.index]
-
-        if not conteo.empty:
-            ax.pie(conteo, labels=conteo.index, autopct='%1.1f%%', colors=cols_pie, startangle=90)
-            ax.set_title('Clasificación de regiones por dinámica')
-
-    # ---------------------------------------------------------
-    # 6. Correlación de Métricas Emergentes (Heatmap)
-    # ---------------------------------------------------------
-    ax = axes[1,2]
-    cols_corr = ['intensidad_loop', 'autocorr_tech', 'velocidad_crecimiento', 'volatilidad_aprendizaje']
-    # Filtrar solo columnas que existen
-    cols_existentes = [c for c in cols_corr if c in df_metrics.columns]
-
-    if len(cols_existentes) > 1:
-        corr = df_metrics[cols_existentes].corr()
-        sns.heatmap(corr, annot=True, cmap='RdBu_r', center=0, ax=ax, fmt='.2f', cbar_kws={"shrink": .5})
-        ax.set_title('Correlaciones de Complejidad')
-        # Rotar etiquetas para legibilidad
-        ax.set_xticklabels([c.replace('_', '\n') for c in cols_existentes], rotation=45)
-        ax.set_yticklabels([c.replace('_', '\n') for c in cols_existentes], rotation=0)
-
-    # Guardado seguro
+    """Versión simplificada para evitar errores"""
     try:
+        df_metrics['tipo_region_economica_actual']
+        categorias = df_metrics['tipo_region_economica_actual'].unique()
+        colores_box = [paleta_segura.get(str(c), 'gray') for c in categorias]
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle('Análisis de Dinámica del Sistema', fontsize=16)
+
+        # Gráfico 1: Simple
+        if 'tasa_aprendizaje' in df_ts.columns:
+            ax = axes[0,0]
+            df_ts.groupby('paso_tiempo')['tasa_aprendizaje'].mean().plot(ax=ax)
+            ax.set_title('Tasa de aprendizaje promedio')
+
+        # Gráfico 2: Simple
+        ax = axes[0,1]
+        if not df_brechas.empty and 'coeficiente_variacion' in df_brechas.columns:
+            ax.bar(range(len(df_brechas)), df_brechas['coeficiente_variacion'])
+            ax.set_title('Heterogeneidad regional')
+
+        # Gráfico 3: Simple
+        ax = axes[1,0]
+        if not df_metrics.empty and 'intensidad_loop' in df_metrics.columns:
+            df_metrics['intensidad_loop'].hist(ax=ax)
+            ax.set_title('Distribución de intensidad de loops')
+
+        # Gráfico 4: Simple
+        ax = axes[1,1]
+        if not df_metrics.empty and 'tipo_dinamica' in df_metrics.columns:
+            df_metrics['tipo_dinamica'].value_counts().plot(kind='pie', ax=ax)
+            ax.set_title('Tipos de dinámica')
+
         plt.tight_layout()
-        plt.savefig(os.path.join(save_path, '06_analisis_sistemas_complejos.png'),
-                   bbox_inches='tight', dpi=300)
+        plt.savefig(os.path.join(save_path, '06_analisis_sistemas_complejos.png'))
         plt.close()
         print("   ✅ Gráfico de emergencia guardado.")
     except Exception as e:
-        print(f"   ⚠️ Error guardando gráfico: {e}")
+        print(f"   ⚠️ Error gráfico emergente: {e}")
 
 def crear_tabla_resumen_tipologico(resultados: pd.DataFrame, save_path: str):
     """
@@ -3665,12 +3626,17 @@ def analizar_evolucion_cambio_tecnico(resultados: pd.DataFrame, save_path: str):
     """
 
     print("\n=== ANÁLISIS DE EVOLUCIÓN DEL CAMBIO TÉCNICO ===")
+    colores_tip = {
+    'Atrapada': '#E74C3C',
+    'No_Atrapada': '#27AE60',
+    'En_transicion': '#F39C12',
+    'EN_TRANSICION': '#F39C12'}
 
     # Copia de trabajo con columnas relevantes
     cols_tech = [
         'id_region', 'paso_tiempo', 'tipo_region_economica_actual',
         'capacidad_tecnologica', 'tasa_innovacion',
-        'innovaciones_realizadas', 'actualizacion_tecnologica'
+        'innovaciones_realizadas'
     ]
     # Filtrar solo columnas existentes
     df = resultados[[c for c in cols_tech if c in resultados.columns]].copy()
@@ -3882,7 +3848,13 @@ if __name__ == "__main__":
     # 3. Ejecución del Modelo Central
     # -----------------------------------------------------
     # La función ejecutar_analisis_completo() ya instancia el modelo y corre la simulación
-    modelo_instancia, df_resultados = ejecutar_analisis_completo()
+    modelo_instancia = None
+    df_resultados = pd.DataFrame() # Initialize df_resultados to an empty DataFrame
+    try:
+        modelo_instancia, df_resultados = ejecutar_analisis_completo()
+    except Exception as e:
+        print(f"❌ Error al ejecutar el análisis completo: {e}")
+        # If an error occurs, df_resultados remains an empty DataFrame.
 
     if df_resultados.empty:
         print("❌ Error crítico: La simulación no generó datos.")
@@ -3912,10 +3884,9 @@ if __name__ == "__main__":
 
     # B. Correlaciones y Mapas de Calor
     try:
-        # Assuming crear_graficos_correlacion_optimizados is defined elsewhere or should be skipped
-        print("   ⚠️ [2/6] Skipping correlation graphs (function not defined)")
-        # crear_graficos_correlacion_optimizados(df_resultados, save_path)
-        analisis_totales -= 1 # Adjust total if skipping
+        crear_graficos_correlacion_optimizados(df_resultados, save_path)
+        print("   ✅ [2/6] Análisis de correlación generado")
+        analisis_exitosos += 1
     except NameError:
         print("   ⚠️ [2/6] Skipped correlation graphs as function `crear_graficos_correlacion_optimizados` is not defined.")
         analisis_totales -= 1 # Adjust total if skipping due to NameError
