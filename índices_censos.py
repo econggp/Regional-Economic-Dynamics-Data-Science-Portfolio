@@ -12,6 +12,19 @@ import numpy as np
 
 df = pd.read_excel('/content/SAIC_Exporta_202623_11343700.xlsx')
 
+def validar_datos(df, columnas_criticas):
+    """Valida que no haya valores críticos faltantes"""
+    reporte = {}
+    for col in columnas_criticas:
+        nulos = df[col].isna().sum()
+        ceros = (df[col] == 0).sum()
+        reporte[col] = {'nulos': nulos, 'ceros': ceros}
+    return pd.DataFrame(reporte)
+
+# Ejecutar validación
+columnas_criticas = ['pot', 'pacd', 'ppvs', 'tga', 'ataf', 'vacb']
+print(validar_datos(df, columnas_criticas))
+
 # Columnas que son etiquetas (ID)
 columnas_identidad = ['tcode', 'tent', 'NOMGEO', 'AE', 'ID']
 
@@ -20,82 +33,101 @@ variables = df.columns.difference(columnas_identidad)
 # Limpieza a todas las variables numéricas simultáneamente
 df[variables] = df[variables].apply(pd.to_numeric, errors='coerce')
 
-# Totales por año y por sector
-df['pot_i'] = df.groupby(['tcode', 'AE'])['pot'].transform(lambda x: x.sum(skipna=True))
-df['pacd_i'] = df.groupby(['tcode', 'AE'])['pacd'].transform(lambda x: x.sum(skipna=True))
-df['ppvs_i'] = df.groupby(['tcode', 'AE'])['ppvs'].transform(lambda x: x.sum(skipna=True))
-df['ue_i'] = df.groupby(['tcode', 'AE'])['UE'].transform(lambda x: x.sum(skipna=True))
-df['vacb_i'] = df.groupby(['tcode', 'AE'])['vacb'].transform(lambda x: x.sum(skipna=True))
-df['itot_i'] = df.groupby(['tcode', 'AE'])['itot'].transform(lambda x: x.sum(skipna=True))
-df['ataf_i'] = df.groupby(['tcode', 'AE'])['ataf'].transform(lambda x: x.sum(skipna=True))
-df['fbcf_i'] = df.groupby(['tcode', 'AE'])['fbcf'].transform(lambda x: x.sum(skipna=True))
+def calcular_totales_groupby(df, columnas, grupo, sufijo):
+    """
+    Calcula totales de múltiples columnas en una sola operación groupby.
 
-# Totales por año y por entidad
-df['pot_j'] = df.groupby(['tcode', 'NOMGEO'])['pot'].transform(lambda x: x.sum(skipna=True))
-df['pacd_j'] = df.groupby(['tcode', 'NOMGEO'])['pacd'].transform(lambda x: x.sum(skipna=True))
-df['ppvs_j'] = df.groupby(['tcode', 'NOMGEO'])['ppvs'].transform(lambda x: x.sum(skipna=True))
-df['ue_j'] = df.groupby(['tcode', 'NOMGEO'])['UE'].transform(lambda x: x.sum(skipna=True))
-df['vacb_j'] = df.groupby(['tcode', 'NOMGEO'])['vacb'].transform(lambda x: x.sum(skipna=True))
-df['itot_j'] = df.groupby(['tcode', 'NOMGEO'])['itot'].transform(lambda x: x.sum(skipna=True))
-df['ataf_j'] = df.groupby(['tcode', 'NOMGEO'])['ataf'].transform(lambda x: x.sum(skipna=True))
-df['fbcf_j'] = df.groupby(['tcode', 'NOMGEO'])['fbcf'].transform(lambda x: x.sum(skipna=True))
+    Parámetros:
+    -----------
+    df : DataFrame
+        DataFrame de trabajo
+    columnas : list
+        Lista de columnas a agregar
+    grupo : list
+        Columnas para agrupar
+    sufijo : str
+        Sufijo para las columnas resultantes (ej: '_i', '_j', '_n')
 
-# Totales globales por año censal
-pot_n = df.groupby('tcode')['pot'].sum().to_dict()
-pacd_n = df.groupby('tcode')['pacd'].sum().to_dict()
-ppvs_n = df.groupby('tcode')['ppvs'].sum().to_dict()
-ue_n = df.groupby('tcode')['UE'].sum().to_dict()
-vacb_n = df.groupby('tcode')['vacb'].sum().to_dict()
-itot_n = df.groupby('tcode')['itot'].sum().to_dict()
-ataf_n = df.groupby('tcode')['ataf'].sum().to_dict()
-fbcf_n = df.groupby('tcode')['fbcf'].sum().to_dict()
+    Retorna:
+    --------
+    DataFrame con las columnas agregadas
+    """
+    totales = df.groupby(grupo)[columnas].transform('sum')
+    totales.columns = [f'{col}{sufijo}' for col in totales.columns]
+    return totales
+
+# COLUMNAS MÉTRICAS
+metricas = ['pot', 'pacd', 'ppvs', 'UE', 'vacb', 'itot', 'ataf', 'fbcf']
+
+# TOTALES POR SECTOR (sufijo _i)
+df_totales_i = calcular_totales_groupby(df, metricas, ['tcode', 'AE'], '_i')
+
+# TOTALES POR ENTIDAD (sufijo _j)
+df_totales_j = calcular_totales_groupby(df, metricas, ['tcode', 'NOMGEO'], '_j')
+
+# TOTALES NACIONALES (sufijo _tn)
+df_totales_n = calcular_totales_groupby(df, metricas, ['tcode'], '_tn')
+
+# Identificar y eliminar columnas duplicadas antes de concatenar para evitar el error
+# debido a columnas con nombres repetidos
+existing_calculated_cols = [col for col in df.columns if col.endswith(('_i', '_j', '_tn'))]
+df = df.drop(columns=existing_calculated_cols, errors='ignore')
+
+# Unir todas las nuevas columnas en una sola operación para evitar la fragmentación
+df = pd.concat([df, df_totales_i, df_totales_j, df_totales_n], axis=1)
+
+# VALIDACIÓN RÁPIDA
+print(f"Columnas creadas: {len(df_totales_i.columns) + len(df_totales_j.columns) + len(df_totales_n.columns)}")
+print(f"Valores NaN en totales: {df[df_totales_i.columns].isna().sum().sum()}")
+
+# FUNCIÓN AUXILIAR PARA DIVISIÓN SEGURA
+def safe_divide(numerator, denominator, default=0):
+    return np.where(denominator != 0, numerator / denominator, default)
 
 """Índices de capacidades"""
 
 # automa
-df['automa'] = df['atmep'] / df['ppvs']
+df['automa'] = safe_divide(df['atmep'], df['ppvs'])
 
 # ecpacd
-df['ecpacd'] = df['tspacd'] / (df['tga'] - df['tspacd'])
+df['ecpacd'] = safe_divide(df['tspacd'], (df['tga'] - df['tspacd']))
 
 # ecppvs
-df['ecppvs'] = df['tsppvs'] / (df['tga'] - df['tsppvs'])
+df['ecppvs'] = safe_divide(df['tsppvs'], (df['tga'] - df['tsppvs']))
 
 # sact
-df['sact'] = (df['ataf'] - df['dtaf']) / df['ataf']
+df['sact'] = safe_divide((df['ataf'] - df['dtaf']), df['ataf'])
 
 # ecos
-df['ecos'] = df['vacb'] / df['tga']
+df['ecos'] = safe_divide(df['vacb'], df['tga'])
 
 # efene
-df['efene'] = (df['gcee'] + df['ccle']) / df['vacb']
+df['efene'] = safe_divide((df['gcee'] + df['ccle']), df['vacb'])
 
 # mbi
-df['mbi'] = (df['tin'] - df['tga']) / df['tin']
+df['mbi'] = safe_divide((df['tin'] - df['tga']), df['tin'])
+
+df['roi'] = safe_divide(df['vacb'], df['fbcf'])
 
 # cdig
-df['cdig'] = df['atecp'] / df['pot']
+df['cdig'] = safe_divide(df['atecp'], df['pot'])
 
 # intal
-df['intal'] = (df['cspct'] + df['tspacd']) / df['tga']
+df['intal'] = safe_divide((df['cspct'] + df['tspacd']), df['tga'])
 
 # ite
-df['ite'] = (df['atecp'] + df['atmep']) / df['ataf']
+df['ite'] = safe_divide((df['atecp'] + df['atmep']), df['ataf'])
 
 """Índices de derrames"""
 
-df['pn_pot'] = df['pot_i'] / df['tcode'].map(pot_n)
-df['pn_pacd'] = df['pacd_i'] / df['tcode'].map(pacd_n)
-df['pn_ppvs'] = df['ppvs_i'] / df['tcode'].map(ppvs_n)
-df['pn_ue'] = df['ue_i'] / df['tcode'].map(ue_n)
+df['pn_pot'] = safe_divide(df['pot_i'], df['pot_tn'])
+df['pn_pacd'] = safe_divide(df['pacd_i'], df['pacd_tn'])
+df['pn_ppvs'] = safe_divide(df['ppvs_i'], df['ppvs_tn'])
+df['pn_ue'] = safe_divide(df['UE_i'], df['UE_tn'])
 
-df['marpot'] = (df['pot'] / df['pot_j'])/ df['pn_pot']
-df['marpacd'] = (df['pacd'] / df['pacd_j'])/ df['pn_pot']
-df['marppvs'] = (df['ppvs'] / df['ppvs_j'])/ df['pn_pot']
-
-df['marpot'] = df['marpot'].replace([np.inf, -np.inf], 0).fillna(0)
-df['marpacd'] = df['marpacd'].replace([np.inf, -np.inf], 0).fillna(0)
-df['marppvs'] = df['marppvs'].replace([np.inf, -np.inf], 0).fillna(0)
+df['marpot'] = safe_divide(df['pot'], safe_divide(df['pot_j'], df['pn_pot']))
+df['marpacd'] = safe_divide(df['pacd'], safe_divide(df['pacd_j'], df['pn_pot']))
+df['marppvs'] = safe_divide(df['ppvs'], safe_divide(df['ppvs_j'], df['pn_pot']))
 
 df_2023 = df[df['tcode'] == 2023].copy()
 df_2018 = df[df['tcode'] == 2018].copy()
@@ -128,15 +160,20 @@ print(resultado_top08[resultado_top08['NOMGEO'].str.contains("Nuevo León", na=F
 print(resultado_top03[resultado_top03['NOMGEO'].str.contains("Nuevo León", na=False)])
 
 # Proporciones regionales
-df['ps_pot'] = df['pot'] / df['pot_j']
-df['ps_pacd'] = df['pacd'] / df['pacd_j']
-df['ps_ppvs'] = df['ppvs'] / df['ppvs_j']
-df['ps_vacb'] = df['vacb'] / df['vacb_j']
+df['ps_pot'] = safe_divide(df['pot'], df['pot_j'])
+df['ps_pacd'] = safe_divide(df['pacd'], df['pacd_j'])
+df['ps_ppvs'] = safe_divide(df['ppvs'], df['ppvs_j'])
+df['ps_vacb'] = safe_divide(df['vacb'], df['vacb_j'])
 
 # Calcular el componente de Shannon: p_i * ln(p_i)
-df['sp_pot'] = df['ps_pot'] * np.log(df['ps_pot'])
-df['sp_pacd'] = df['ps_pacd'] * np.log(df['ps_pacd'])
-df['sp_ppvs'] = df['ps_ppvs'] * np.log(df['ps_ppvs'])
+df['ps_pot_safe'] = df['ps_pot'].clip(lower=1e-10)  # Evitar log(0)
+df['sp_pot'] = df['ps_pot'] * np.log(df['ps_pot_safe'])
+
+df['ps_pacd_safe'] = df['ps_pacd'].clip(lower=1e-10)  # Evitar log(0)
+df['sp_pacd'] = df['ps_pacd'] * np.log(df['ps_pacd_safe'])
+
+df['ps_ppvs_safe'] = df['ps_ppvs'].clip(lower=1e-10)  # Evitar log(0)
+df['sp_ppvs'] = df['ps_ppvs'] * np.log(df['ps_ppvs_safe'])
 
 # DIV
 sh_pot = df.groupby(['tcode', 'NOMGEO']).agg(
@@ -149,10 +186,20 @@ sh_ppvs = df.groupby(['tcode', 'NOMGEO']).agg(
     h_ppvs=('sp_ppvs', lambda x: x.sum() * -1),
     S_sectores=('AE', 'count')).reset_index()
 
+# Merge Shannon indices and sector count into df
+df = pd.merge(df, sh_pot[['tcode', 'NOMGEO', 'h_pot', 'S_sectores']], on=['tcode', 'NOMGEO'], how='left')
+df = pd.merge(df, sh_pacd[['tcode', 'NOMGEO', 'h_pacd']], on=['tcode', 'NOMGEO'], how='left')
+df = pd.merge(df, sh_ppvs[['tcode', 'NOMGEO', 'h_ppvs']], on=['tcode', 'NOMGEO'], how='left')
+
 # Equitabilidad Pielou (J')
 sh_pot['ep_pot'] = sh_pot['h_pot'] / np.log(sh_pot['S_sectores'])
 sh_pacd['ep_pacd'] = sh_pacd['h_pacd'] / np.log(sh_pacd['S_sectores'])
 sh_ppvs['ep_ppvs'] = sh_ppvs['h_ppvs'] / np.log(sh_ppvs['S_sectores'])
+
+# Merge Pielou's equitability into df
+df = pd.merge(df, sh_pot[['tcode', 'NOMGEO', 'ep_pot']], on=['tcode', 'NOMGEO'], how='left')
+df = pd.merge(df, sh_pacd[['tcode', 'NOMGEO', 'ep_pacd']], on=['tcode', 'NOMGEO'], how='left')
+df = pd.merge(df, sh_ppvs[['tcode', 'NOMGEO', 'ep_ppvs']], on=['tcode', 'NOMGEO'], how='left')
 
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -211,6 +258,42 @@ plt.ylabel('Entidad federativa', fontsize=12)
 
 plt.show()
 
+df['compot'] = np.log(
+    np.clip(
+        np.where(
+            (df['UE'] != 0) & (df['pot_i'] != 0) & (df['UE_j'] != 0),
+            (df['pot'] / df['UE']) / (df['pot_i'] / df['UE_j']),
+            1e-10
+        ),
+        1e-10,
+        None
+    )
+) ** 2
+
+df['compacd'] = np.log(
+    np.clip(
+        np.where(
+            (df['UE'] != 0) & (df['pacd_i'] != 0) & (df['UE_j'] != 0),
+            (df['pacd'] / df['UE']) / (df['pacd_i'] / df['UE_j']),
+            1e-10
+        ),
+        1e-10,
+        None
+    )
+) ** 2
+
+df['comppvs'] = np.log(
+    np.clip(
+        np.where(
+            (df['UE'] != 0) & (df['ppvs_i'] != 0) & (df['UE_j'] != 0),
+            (df['ppvs'] / df['UE']) / (df['ppvs_i'] / df['UE_j']),
+            1e-10
+        ),
+        1e-10,
+        None
+    )
+) ** 2
+
 # Índice de brecha laboral (ibl)
 df['ibl_pot'] = df['ps_pot'] - df['ps_vacb']
 df['ibl_pacd'] = df['ps_pacd'] - df['ps_vacb']
@@ -219,8 +302,8 @@ df['ibl_ppvs'] = df['ps_ppvs'] - df['ps_vacb']
 # Índice de absorción de capacidades tecnológicas
 
 # Cálculo de los componentes
-df['dotacion_tech'] = df['ataf'] / df['pot']
-df['tasa_absorcion'] = df['itot'] / df['vacb']
+df['dotacion_tech'] = safe_divide(df['ataf'], df['pot'])
+df['tasa_absorcion'] = safe_divide(df['itot'], df['vacb'])
 
 # Índice Final (IACT)
 # Usamos raíz cuadrada para suavizar valores extremos
@@ -276,6 +359,309 @@ print(lider_2008[['NOMGEO', 'AE', 'iact_norm', 'itot']])
 lider_2003 = df[(df['tcode'] == 2003) & (df['perfil_tech'] == 'Vanguardia')]
 print(lider_2003[['NOMGEO', 'AE', 'iact_norm', 'itot']])
 
+"""Índices de productividad"""
+
+def calcular_productividad_relativa(df):
+    """
+    Calcula productividad normalizada POR AÑO CENSAL.
+    Elimina efecto inflacionario al comparar dentro del mismo período.
+    """
+
+    # 1. PRODUCTIVIDAD LABORAL NOMINAL (por row)
+    df['prod_laboral_nom'] = safe_divide(df['vacb'], df['pot'])
+
+    # 2. NORMALIZAR DENTRO DE CADA AÑO (z-score o min-max)
+    # Esto elimina el efecto del nivel de precios del año
+    df['prod_laboral_norm'] = df.groupby('tcode')['prod_laboral_nom'].transform(
+        lambda x: (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else 0
+    )
+
+    # 3. RANKING POR AÑO (más robusto que valores absolutos)
+    df['rank_productividad'] = df.groupby('tcode')['prod_laboral_nom'].rank(
+        ascending=False, method='average'
+    )
+
+    # 4. PRODUCTIVIDAD RELATIVA AL PROMEDIO NACIONAL DEL AÑO
+    df['prod_laboral_rel'] = df['prod_laboral_nom'] / df.groupby('tcode')['prod_laboral_nom'].transform('mean')
+
+    return df
+
+# APLICAR
+df = calcular_productividad_relativa(df)
+
+# EJEMPLO DE USO VÁLIDO
+# ✅ CORRECTO: Comparar ranking de sectores dentro de 2023
+top_2023 = df[df['tcode'] == 2023].nsmallest(10, 'rank_productividad')
+
+# ✅ CORRECTO: Comparar si un estado mejoró su posición relativa
+posicion_relativa = df.groupby(['NOMGEO', 'tcode'])['rank_productividad'].mean().unstack()
+mejora = posicion_relativa[2023] - posicion_relativa[2003]
+
+# ❌ INCORRECTO: Comparar valores absolutos entre años
+# df[df['tcode'] == 2023]['prod_laboral_nom'].mean() vs 2003
+
+posicion_relativa
+
+mejora
+
+df['prod_cap'] = safe_divide(df['vacb'], df['ataf'])
+
+# DICCIONARIO DE PESOS POR SECTOR (SCIAN 2 dígitos)
+PESOS_SECTORIALES = {
+    # Agricultura, ganadería, etc.
+    '11': {'alpha': 0.70, 'beta': 0.30},
+    # Minería
+    '21': {'alpha': 0.40, 'beta': 0.60},
+    # Manufactura
+    '31-33': {'alpha': 0.65, 'beta': 0.35},
+    # Construcción
+    '23': {'alpha': 0.60, 'beta': 0.40},
+    # Comercio
+    '46-47': {'alpha': 0.75, 'beta': 0.25},
+    # Servicios
+    '51-56': {'alpha': 0.80, 'beta': 0.20},
+    # Educación, salud
+    '61-62': {'alpha': 0.85, 'beta': 0.15},
+    # Otros servicios
+    '71-81': {'alpha': 0.75, 'beta': 0.25},
+}
+
+# APLICAR PESOS POR SECTOR
+def asignar_pesos(row):
+    ae = str(row['AE'])[:2]  # Primeros 2 dígitos del sector
+    for key, pesos in PESOS_SECTORIALES.items():
+        if ae in key or key in ae:
+            return pd.Series([pesos['alpha'], pesos['beta']])
+    return pd.Series([0.70, 0.30])  # Default
+
+df[['alpha', 'beta']] = df.apply(asignar_pesos, axis=1)
+
+# PTF CON PESOS VARIABLES
+df['ptf'] = safe_divide(df['vacb'], ((df['pot'] ** df['alpha']) * (df['ataf'] ** df['beta'])))
+
+# PTF NORMALIZADA POR AÑO (para comparabilidad)
+df['ptf_norm'] = df.groupby('tcode')['ptf'].transform(
+    lambda x: (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else 0
+)
+
+def crear_tablas_ptf(df, metrica='ptf', anos=None, exportar=True):
+    """
+    Genera batería completa de tablas dinámicas para análisis de PTF.
+
+    Parámetros:
+    -----------
+    df : DataFrame
+        DataFrame con datos censales y PTF calculada
+    metrica : str
+        Métrica a analizar ('ptf', 'ptf_norm', 'vacb', etc.)
+    anos : list
+        Años a incluir (None = todos)
+    exportar : bool
+        Si True, exporta a Excel
+
+    Retorna:
+    --------
+    dict con todas las tablas dinámicas generadas
+    """
+
+    # FILTRAR AÑOS SI SE ESPECIFICA
+    if anos:
+        df = df[df['tcode'].isin(anos)]
+
+    tablas = {}
+
+    # 1. POR ENTIDAD Y AÑO
+    tablas['entidad_año'] = df.pivot_table(
+        values=metrica,
+        index='NOMGEO',
+        columns='tcode',
+        aggfunc='mean',
+        margins=True,
+        margins_name='Promedio Nacional'
+    )
+
+    # 2. POR SECTOR Y AÑO
+    tablas['sector_año'] = df.pivot_table(
+        values=metrica,
+        index='AE',
+        columns='tcode',
+        aggfunc=['mean', 'median'],
+        margins=True
+    )
+
+    # 3. POR ENTIDAD Y SECTOR (ÚLTIMO AÑO)
+    ultimo_ano = df['tcode'].max()
+    df_ultimo = df[df['tcode'] == ultimo_ano]
+    tablas['entidad_sector'] = df_ultimo.pivot_table(
+        values=metrica,
+        index='NOMGEO',
+        columns='AE',
+        aggfunc='mean',
+        fill_value=0
+    )
+
+    # 4. ESTADÍSTICOS COMPLETOS
+    tablas['estadisticos'] = df.groupby(['NOMGEO', 'tcode'])[metrica].agg(
+        ['mean', 'median', 'std', 'min', 'max', 'count']
+    ).reset_index()
+
+    # 5. CAMBIO TEMPORAL
+    if len(df['tcode'].unique()) >= 2:
+        unique_years = sorted(df['tcode'].unique())
+        anos_extremos = [unique_years[0], unique_years[-1]]
+        ptf_inicial = df[df['tcode'] == anos_extremos[0]].groupby('NOMGEO')[metrica].mean()
+        ptf_final = df[df['tcode'] == anos_extremos[-1]].groupby('NOMGEO')[metrica].mean()
+
+        tablas['cambio_temporal'] = pd.DataFrame({
+            f'{metrica}_{anos_extremos[0]}': ptf_inicial,
+            f'{metrica}_{anos_extremos[-1]}': ptf_final,
+            'cambio_absoluto': ptf_final - ptf_inicial,
+            'cambio_porcentual': ((ptf_final - ptf_inicial) / ptf_inicial) * 100
+        }).reset_index().sort_values('cambio_porcentual', ascending=False)
+
+    # EXPORTAR A EXCEL
+    if exportar:
+        with pd.ExcelWriter(f'analisis_ptf_{metrica}.xlsx', engine='openpyxl') as writer:
+            for nombre, tabla in tablas.items():
+                # Recortar nombre de hoja (máx 31 caracteres)
+                hoja = nombre[:31]
+                tabla.to_excel(writer, sheet_name=hoja)
+
+    return tablas
+
+# EJECUTAR
+tablas_ptf = crear_tablas_ptf(df, metrica='ptf', exportar=True)
+
+# ACCEDER A CADA TABLA
+print(tablas_ptf['entidad_año'].head())
+print(tablas_ptf['cambio_temporal'].head())
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Obtener la tabla 'entidad_año' del diccionario
+heatmap_data_entidad_ano = tablas_ptf['entidad_año'].copy()
+
+# Excluir la columna 'Promedio Nacional' para la visualización del heatmap si existe
+if 'Promedio Nacional' in heatmap_data_entidad_ano.columns:
+    heatmap_data_entidad_ano = heatmap_data_entidad_ano.drop(columns=['Promedio Nacional'])
+
+plt.figure(figsize=(14, 10))
+sns.set_theme(style="white")
+
+sns.heatmap(heatmap_data_entidad_ano,
+            annot=True,
+            fmt=".2f",
+            cmap="RdYlGn",
+            linewidths=.5,
+            cbar_kws={'label': 'PTF Promedio'})
+
+plt.title('PTF Promedio por Entidad y Año Censal', fontsize=16)
+plt.xlabel('Año Censal', fontsize=12)
+plt.ylabel('Entidad Federativa', fontsize=12)
+plt.show()
+
+# TABLA DINÁMICA: MÚLTIPLES MÉTRICAS
+# Assuming 'h_pot' was the intended 'sh_pot' for Shannon index
+ptf_multi_metricas = df.pivot_table(
+    values=['ptf', 'marpot', 'h_pot', 'compot','ibl_pot', 'iact_norm'],
+    index=['NOMGEO', 'AE'],     # Filas combinadas
+    columns='tcode',            # Columnas: Años
+    aggfunc='mean',
+    margins=True
+)
+
+print("=" * 80)
+print("MÚLTIPLES MÉTRICAS POR ENTIDAD Y SECTOR")
+print("=" * 80)
+print(ptf_multi_metricas.round(2))
+
+# EXPORTAR
+ptf_multi_metricas.to_excel('ptf_multi_metricas.xlsx')
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# PREPARAR DATOS PARA HEATMAP
+ptf_heatmap = df.pivot_table(
+    values='ptf_norm',
+    index='NOMGEO',
+    columns='tcode',
+    aggfunc='mean'
+)
+
+# GRAFICAR
+plt.figure(figsize=(14, 12))
+sns.heatmap(
+    ptf_heatmap,
+    annot=True,
+    fmt='.2f',
+    cmap='RdYlGn',        # Rojo-Amarillo-Verde
+    linewidths=0.5,
+    cbar_kws={'label': 'PTF Normalizado'}
+)
+plt.title('Evolución de PTF por Entidad Federativa (2003-2023)', fontsize=15)
+plt.xlabel('Año Censal', fontsize=12)
+plt.ylabel('Entidad Federativa', fontsize=12)
+plt.xticks(rotation=0)
+plt.yticks(rotation=0)
+plt.tight_layout()
+plt.show()
+
+# GUARDAR FIGURA
+plt.savefig('ptf_heatmap_entidades.png', dpi=300, bbox_inches='tight')
+
+# PREPARAR DATOS
+ptf_lineas = df.pivot_table(
+    values='ptf',
+    index='tcode',
+    columns='AE',
+    aggfunc='mean'
+)
+
+# GRAFICAR TOP 10 SECTORES
+top_10_sectores = df.groupby('AE')['ptf'].mean().nlargest(10).index
+
+plt.figure(figsize=(14, 8))
+for sector in top_10_sectores:
+    plt.plot(ptf_lineas.index, ptf_lineas[sector], marker='o', label=sector, linewidth=2)
+
+plt.title('Tendencia de PTF por Sector Económico (Top 10)', fontsize=15)
+plt.xlabel('Año Censal', fontsize=12)
+plt.ylabel('PTF', fontsize=12)
+plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+plt.savefig('ptf_tendencias_sectores.png', dpi=300, bbox_inches='tight')
+
+plt.figure(figsize=(12, 6))
+sns.boxplot(
+    data=df,
+    x='tcode',
+    y='ptf_norm',
+    palette='viridis',
+    showfliers=False  # Ocultar outliers extremos
+)
+plt.title('Distribución de PTF Normalizada por Año Censal', fontsize=15)
+plt.xlabel('Año Censal', fontsize=12)
+plt.ylabel('PTF Normalizado', fontsize=12)
+plt.grid(True, alpha=0.3, axis='y')
+plt.show()
+
+plt.savefig('ptf_boxplot_anos.png', dpi=300, bbox_inches='tight')
+
+ptf_por_estado_2023 = df[df['tcode'] == 2023].groupby('NOMGEO')['ptf'].mean().sort_values(ascending=False).head(10)
+
+plt.figure(figsize=(12, 7))
+sns.barplot(x=ptf_por_estado_2023.values, y=ptf_por_estado_2023.index, palette='magma')
+plt.title('Top 10 Estados con Mayor PTF Promedio (2023)', fontsize=15)
+plt.xlabel('PTF Promedio', fontsize=12)
+plt.ylabel('Estado', fontsize=12)
+plt.grid(axis='x', linestyle='--', alpha=0.7)
+plt.show()
+
 """Índices espaciales"""
 
 # Índice de Concentración Geográfica
@@ -287,14 +673,14 @@ df['ppvs_tn'] = df.groupby('tcode')['ppvs'].transform('sum')
 
 # Calcular los dos términos de la resta dentro del valor absoluto
 # Término A: Participación del estado j en el sector i
-df['term_A_pot'] = df['pot'] / df['pot_i']
-df['term_A_pacd'] = df['pacd'] / df['pacd_i']
-df['term_A_ppvs'] = df['ppvs'] / df['ppvs_i']
+df['term_A_pot'] = safe_divide(df['pot'], df['pot_i'])
+df['term_A_pacd'] = safe_divide(df['pacd'], df['pacd_i'])
+df['term_A_ppvs'] = safe_divide(df['ppvs'], df['ppvs_i'])
 
 # Término B: Participación del estado j en la economía nacional total
-df['term_B_pot'] = df['pot_j'] / df['pot_tn']
-df['term_B_pacd'] = df['pacd_j'] / df['pacd_tn']
-df['term_B_ppvs'] = df['ppvs_j'] / df['ppvs_tn']
+df['term_B_pot'] = safe_divide(df['pot_j'], df['pot_tn'])
+df['term_B_pacd'] = safe_divide(df['pacd_j'], df['pacd_tn'])
+df['term_B_ppvs'] = safe_divide(df['ppvs_j'], df['ppvs_tn'])
 
 # Calcular el valor absoluto de la diferencia
 df['abs_diff_pot'] = (df['term_A_pot'] - df['term_B_pot']).abs()
@@ -314,14 +700,14 @@ qs_df_ppvs['Qs_ppvs'] = qs_df_ppvs['abs_diff_ppvs'] * 0.5
 
 # Cálculo de los componentes
 # Participación local del sector i en el estado j
-df['pl_pot'] = df['pot'] / df['pot_j']
-df['pl_pacd'] = df['pacd'] / df['pacd_j']
-df['pl_ppvs'] = df['ppvs'] / df['ppvs_j']
+df['pl_pot'] = safe_divide(df['pot'], df['pot_j'])
+df['pl_pacd'] = safe_divide(df['pacd'], df['pacd_j'])
+df['pl_ppvs'] = safe_divide(df['ppvs'], df['ppvs_j'])
 
 # Participación nacional del sector i
-df['pn_pot'] = df['pot_i'] / df['pot_tn']
-df['pn_pacd'] = df['pacd_i'] / df['pacd_tn']
-df['pn_ppvs'] = df['ppvs_i'] / df['ppvs_tn']
+df['pn_pot'] = safe_divide(df['pot_i'], df['pot_tn'])
+df['pn_pacd'] = safe_divide(df['pacd_i'], df['pacd_tn'])
+df['pn_ppvs'] = safe_divide(df['ppvs_i'], df['ppvs_tn'])
 
 # Cálculo del Índice Qr (Agrupado por Estado y Año)
 qr_df_pot = df.groupby(['tcode', 'NOMGEO']).apply(
@@ -333,6 +719,9 @@ qr_df_pacd = df.groupby(['tcode', 'NOMGEO']).apply(
 qr_df_ppvs = df.groupby(['tcode', 'NOMGEO']).apply(
     lambda x: 0.5 * np.sum(np.abs(x['pl_ppvs'] - x['pn_ppvs']))
 ).reset_index(name='Qr_ppvs')
+
+# Merge Qr_pot into the main DataFrame df
+df = pd.merge(df, qr_df_pot[['tcode', 'NOMGEO', 'Qr_pot']], on=['tcode', 'NOMGEO'], how='left')
 
 crecimiento_pot = df.groupby(['tcode', 'NOMGEO'])['pot'].sum().reset_index()
 crecimiento_pacd = df.groupby(['tcode', 'NOMGEO'])['pacd'].sum().reset_index()
@@ -460,14 +849,14 @@ df_actual = df_2023[['NOMGEO', 'AE', 'pot']].rename(columns={'pot': 'pot_T'})
 # Unimos ambos años en un solo DataFrame de trabajo
 df_dinamico = pd.merge(df_actual, df_base, on=['NOMGEO', 'AE'], how='left')
 
-df_dinamico['rv_ij'] = df_dinamico['pot_T'] / df_dinamico['pot_0']
+df_dinamico['rv_ij'] = safe_divide(df_dinamico['pot_T'], df_dinamico['pot_0'])
 
 df_dinamico['total_estado_T'] = df_dinamico.groupby('NOMGEO')['pot_T'].transform('sum')
 df_dinamico['total_estado_0'] = df_dinamico.groupby('NOMGEO')['pot_0'].transform('sum')
 
 # Calculamos las proporciones V_ij / sum(V_ij)
-df_dinamico['prop_T'] = df_dinamico['pot_T'] / df_dinamico['total_estado_T']
-df_dinamico['prop_0'] = df_dinamico['pot_0'] / df_dinamico['total_estado_0']
+df_dinamico['prop_T'] = safe_divide(df_dinamico['pot_T'], df_dinamico['total_estado_T'])
+df_dinamico['prop_0'] = safe_divide(df_dinamico['pot_0'], df_dinamico['total_estado_0'])
 
 # Calculamos el valor absoluto de la diferencia
 df_dinamico['diff_abs_crr'] = (df_dinamico['prop_T'] - df_dinamico['prop_0']).abs()
@@ -487,8 +876,8 @@ df_dinamico['total_nacional_sec_0'] = df_dinamico.groupby('AE')['pot_0'].transfo
 
 # Calculamos las participaciones (proporciones geográficas)
 # Si el total nacional es 0 (sector extinto), el resultado será 0
-df_dinamico['part_geo_T'] = (df_dinamico['pot_T'] / df_dinamico['total_nacional_sec_T']).fillna(0)
-df_dinamico['part_geo_0'] = (df_dinamico['pot_0'] / df_dinamico['total_nacional_sec_0']).fillna(0)
+df_dinamico['part_geo_T'] = safe_divide(df_dinamico['pot_T'], df_dinamico['total_nacional_sec_T'])
+df_dinamico['part_geo_0'] = safe_divide(df_dinamico['pot_0'], df_dinamico['total_nacional_sec_0'])
 
 # Calculamos la diferencia absoluta
 df_dinamico['diff_abs_crs'] = (df_dinamico['part_geo_T'] - df_dinamico['part_geo_0']).abs()
@@ -535,7 +924,7 @@ crecimiento_sectorial = df_dinamico.groupby('AE').agg({
     'pot_0': 'sum'
 }).reset_index()
 
-crecimiento_sectorial['rVi'] = (crecimiento_sectorial['pot_T'] / crecimiento_sectorial['pot_0'])
+crecimiento_sectorial['rVi'] = safe_divide(crecimiento_sectorial['pot_T'], crecimiento_sectorial['pot_0'])
 
 # Unimos con el CRs que ya teníamos
 cuadrante_data = pd.merge(crs_resultado[['AE', 'CRs']], crecimiento_sectorial[['AE', 'rVi']], on='AE')
@@ -873,3 +1262,21 @@ plt.ylabel('Crecimiento Nacional del Sector (rSi)', fontsize=12)
 plt.colorbar(label='Tasa de Crecimiento')
 
 plt.show()
+
+# Merge EDj and EEj from resumen_shift_share into the main DataFrame df
+# Note: EDj and EEj are calculated for the entire period (2003-2023), not year-specific.
+# When merged on 'NOMGEO', these values will be broadcasted across all years and sectors for each state.
+df = pd.merge(df, resumen_shift_share[['NOMGEO', 'EDj', 'EEj']], on='NOMGEO', how='left')
+
+"""Guardado de procesos"""
+
+output_file_name = 'df_exportado.xlsx'
+df.to_excel(output_file_name, index=False)
+print(f"DataFrame guardado exitosamente como '{output_file_name}'")
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+output_file_path = '/content/drive/MyDrive/df_exportado_drive.xlsx'
+df.to_excel(output_file_path, index=False)
+print(f"DataFrame guardado exitosamente en '{output_file_path}'")
