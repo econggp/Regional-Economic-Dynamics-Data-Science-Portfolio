@@ -561,6 +561,62 @@ plt.xlabel('Año Censal', fontsize=12)
 plt.ylabel('Entidad Federativa', fontsize=12)
 plt.show()
 
+def analisis_sensibilidad_pesos_ptf(df):
+    """Prueba cómo cambia PTF con diferentes pesos α y β"""
+
+    escenarios = {
+        'Base (0.7, 0.3)': (0.7, 0.3),
+        'Solow (0.75, 0.25)': (0.75, 0.25),
+        'OECD (0.65, 0.35)': (0.65, 0.35),
+        'Capital-intensivo (0.5, 0.5)': (0.5, 0.5),
+        'Trabajo-intensivo (0.8, 0.2)': (0.8, 0.2)
+    }
+
+    resultados = {}
+    df_2023 = df[df['tcode'] == 2023].copy()
+
+    for nombre, (alpha, beta) in escenarios.items():
+        ptf = df_2023['vacb'] / ((df_2023['pot'] ** alpha) *
+                                  (df_2023['ataf'] ** beta))
+        ptf_norm = (ptf - ptf.min()) / (ptf.max() - ptf.min())
+        resultados[nombre] = ptf_norm
+
+    # MATRIZ DE CORRELACIÓN ENTRE ESCENARIOS
+    df_escenarios = pd.DataFrame(resultados)
+    correlaciones = df_escenarios.corr()
+
+    print("=" * 80)
+    print("ANÁLISIS DE SENSIBILIDAD: PESOS PTF")
+    print("=" * 80)
+    print("\nCorrelaciones entre escenarios:")
+    print(correlaciones.round(3))
+
+    # RANKING DE ESTADOS (¿Cambia con diferentes pesos?)
+    ranking_base = resultados['Base (0.7, 0.3)'].rank(ascending=False)
+    ranking_extremo = resultados['Capital-intensivo (0.5, 0.5)'].rank(ascending=False)
+
+    cambio_ranking = (ranking_base - ranking_extremo).abs()
+    print(f"\nCambio promedio en ranking: {cambio_ranking.mean():.2f} posiciones")
+    print(f"Máximo cambio: {cambio_ranking.max():.0f} posiciones")
+
+    # VISUALIZAR
+    plt.figure(figsize=(14, 8))
+    for nombre, ptf_norm in resultados.items():
+        plt.plot(ptf_norm.sort_values().values, label=nombre, linewidth=2)
+    plt.xlabel('Estado (ordenado por PTF)', fontsize=12)
+    plt.ylabel('PTF Normalizado', fontsize=12)
+    plt.title('Sensibilidad de PTF a Pesos Factoriales', fontsize=14)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig('sensibilidad_ptf.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+    return correlaciones, df_escenarios
+
+# EJECUTAR
+corr_sensibilidad, df_sensibilidad = analisis_sensibilidad_pesos_ptf(df)
+
 # TABLA DINÁMICA: MÚLTIPLES MÉTRICAS
 # Assuming 'h_pot' was the intended 'sh_pot' for Shannon index
 ptf_multi_metricas = df.pivot_table(
