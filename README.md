@@ -6,41 +6,60 @@ This repository contains a complete pipeline developed in R for cluster analysis
 ⭐ Composite Index Construction
 
 Robust Scaling: Handling of outliers and heterogeneity through median and IQR-based scaling.
+
 Principal Component Analysis (PCA): Creation of three latent indices for dimensionality reduction:
-ICP: Productive Capabilities Index.
-ICI: Industrial Competitiveness Index.
-ICS: Systemic Capabilities Index.
+
+* ICP: Productive Capabilities Index.
+
+* ICI: Industrial Competitiveness Index.
+
+* ICS: Systemic Capabilities Index.
 
 ⭐ Advanced Clustering Algorithms
 
 Multiple methodologies are implemented and compared to ensure grouping robustness:
-K-Means: With optimal k selection via elbow method and silhouette.
-Hierarchical Clustering: Ward's method with dendrograms.
-DBSCAN: Density-based cluster and noise detection.
-GMM (Gaussian Mixture Models): Modeling of elliptical and non-spherical shapes.
-Spectral Clustering: For complex non-convex structures.
+
+* K-Means: With optimal k selection via elbow method and silhouette.
+
+* Hierarchical Clustering: Ward's method with dendrograms.
+
+* DBSCAN: Density-based cluster and noise detection.
+
+* GMM (Gaussian Mixture Models): Modeling of elliptical and non-spherical shapes.
+
+* Spectral Clustering: For complex non-convex structures.
 
 ⭐ Statistical Validation and Stability
 
 Stability: Bootstrap and Jaccard coefficient for consistency evaluation.
+
 Sensitivity: Adjusted Rand Index (ARI) for partition comparison.
 Hypothesis Testing:
+
 ANOVA and Kruskal-Wallis for between-cluster differences.
+
 Post-hoc tests (Tukey, Dunn).
+
 Assumption validation (Shapiro-Wilk, Levene).
+
 MANOVA and PERMANOVA for global multivariate analysis.
+
 Discriminant Analysis (LDA): Evaluation of cluster separation capability.
 
 ⭐ Temporal Dynamics and Transitions
 
 Markov Chains: Transition matrices between periods (e.g., 2003-2008, 2008-2013, etc.).
+
 Cluster Stability: Persistence calculation and mean return times.
+
 Alluvial Diagrams: Visualization of entity trajectories through time.
 
 ⭐ Spatial Analysis
 
 GIS Integration: Join with state-level shapefiles.
+
 Spatial Autocorrelation: Global and Local Moran's I calculation to identify significant spatial patterns.
+
 Thematic Maps: Visualization of clusters and Moran values by entity and sector.
 
 # 📊 RESULTS (Key Findings)
@@ -67,9 +86,12 @@ Thematic Maps: Visualization of clusters and Moran values by entity and sector.
 | **Markov test**       | p < 0.001 | Non-random process, significant temporal dependence |
 
 Identified pattern:
-Low-capability trap: 67% probability of remaining in clusters 1-2
-Stable technological elite: 82% persistence in cluster 6
-Intermediate mobility: Higher dynamism in clusters 3-4 (bidirectional transitions)
+
+* Low-capability trap: 67% probability of remaining in clusters 1-2
+
+* Stable technological elite: 82% persistence in cluster 6
+
+* Intermediate mobility: Higher dynamism in clusters 3-4 (bidirectional transitions)
 
 🗺️ Spatial Patterns
 
@@ -81,7 +103,9 @@ Intermediate mobility: Higher dynamism in clusters 3-4 (bidirectional transition
 | **TFP**  | 0.22              | p < 0.05     | Traditional industrial corridor |
 
 Key finding: A dual spatial structure exists:
+
 Technological core: Mexico City, Nuevo León, Jalisco (clusters 5-6)
+
 Periphery: Chiapas, Oaxaca, Guerrero (persistent clusters 1-2)
 
 🎯 Cluster Characterization (2023 Profile)
@@ -98,7 +122,9 @@ Periphery: Chiapas, Oaxaca, Guerrero (persistent clusters 1-2)
 📉 Evidence of Path Dependence
 
 Regional hysteresis: 0.67 correlation between 2003 and 2023 clusters
+
 Neighborhood effect: Bordering entities with high capability have 2.3x probability of upward transition
+
 Divergence: Growing inter-regional inequality (cluster Gini index: 0.42 → 0.51)
 
 # 📦 Requirements and Dependencies
@@ -155,14 +181,20 @@ Reporting: Generation of kable tables and graphic exports.
 
 results/
 ├── transition_matrices/          # Markov probability CSVs
+
 ├── bootstrap_stability/          # Jaccard by year and k
+
 ├── statistical_validation/       # ANOVA, MANOVA, PERMANOVA
+
 ├── assumption_diagnostics/       # Normality, Levene
+
 ├── discriminant_analysis/        # LDA and accuracy
+
 ├── spatial/                      # Local Moran (shp) and heatmaps
+
 └── visualizations/               # PNG: alluvial, stream, bars
 
-🔑 Methodological Contributions
+# 🔑 Methodological Contributions
 
 Multi-algorithm integration: Systematic comparison of GMM vs. Spectral vs. Hierarchical with stability criteria
 
@@ -171,6 +203,11 @@ Robust validation: Complete diagnostic pipeline (assumptions → multivariate �
 Spatial-temporal approach: Union of Markov dynamics with spatial autocorrelation (LISA)
 
 Robust scaling: Explicit outlier handling through IQR instead of Z-score
+
+🗝️ Key Methodological Highlights
+
+<img width="785" height="235" alt="image" src="https://github.com/user-attachments/assets/0f1e003d-9e79-49ed-9902-0d8f25af7582" />
+
 
 📚 Key Methodological References
 
