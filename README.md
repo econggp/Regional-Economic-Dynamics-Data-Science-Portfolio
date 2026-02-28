@@ -2,7 +2,9 @@
 
 This repository contains a complete Python pipeline for calculating economic indices, productivity metrics, spatial concentration measures, and shift-share analysis based on Mexican census data (2003-2023). The script integrates data validation, index construction, statistical analysis, and comprehensive visualization.
 
+
 # 🚀 Key Features
+
 
 ⭐ Data Validation & Preprocessing
 
@@ -13,6 +15,7 @@ Robust Data Cleaning: Numeric conversion with error coercion and handling of mis
 Multi-level Aggregation: Calculation of totals by sector, entity, and national level.
 
 Safe Division Functions: Prevention of division-by-zero errors throughout calculations.
+
 
 ⭐ Economic Capacity Indices
 
@@ -34,6 +37,7 @@ intal: Technology and training intensity.
 ite: Total equipment intensity.
 iact: Technological Absorption Capacity Index (normalized 0-1).
 
+
 ⭐ Productivity Analysis (PTF)
 
 Total Factor Productivity: Cobb-Douglas function with sector-specific weights.
@@ -45,6 +49,7 @@ Normalization: Min-max scaling by census year for comparability.
 Sensitivity Analysis: Testing PTF robustness across different weight scenarios (Solow, OECD, Capital-intensive, Labor-intensive).
 
 Ranking System: Relative productivity rankings within each census year.
+
 
 ⭐ Spatial & Specialization Indices
 
@@ -61,8 +66,9 @@ Shannon Diversity Indices:
 Restructuring Coefficients:
 
 * CRr: State-level restructuring (2003-2023).
-* 
+  
 * CRs: Sector-level geographic restructuring.
+
 
 ⭐ Shift-Share Analysis
 
@@ -76,6 +82,7 @@ Inertial Effect (EIj): State growth momentum vs. national average.
 
 Growth Decomposition: Visual breakdown of growth components by state.
 
+
 ⭐ Advanced Analytics
 
 Dynamic Quadrant Analysis: Technology (IACT) vs. Competitiveness (EDj) matrix.
@@ -86,7 +93,9 @@ Sector Dynamics: Star sectors (high growth + high restructuring) identification.
 
 Correlation Analysis: Technology-competitiveness relationship quantification.
 
+
 # 📊 RESULTS (Key Findings)
+
 
 🏆 Technological Absorption Leaders (2023)
 
@@ -98,6 +107,7 @@ Correlation Analysis: Technology-competitiveness relationship quantification.
 
 Key finding: Only 12% of state-sector combinations reached Vanguard status in 2023, concentrated in manufacturing and advanced services.
 
+
 📈 Productivity Dynamics
 
 | Metric                        | 2003         | 2023         | Change                |
@@ -108,6 +118,7 @@ Key finding: Only 12% of state-sector combinations reached Vanguard status in 20
 | **Fastest growth**            | Quintana Roo | Quintana Roo | Tourism-driven        |
 
 TFP sensitivity: Correlation between weighting scenarios = 0.89-0.97, indicating robustness to α/β specification.
+
 
 🗺️ Spatial Restructuring (2003-2023)
 
@@ -123,6 +134,7 @@ Winners: States with positive EDj (competitiveness effect) > EEj (structural eff
 
 Losers: States dependent on declining sectors with negative EDj
 
+
 ⚙️ Sectoral Dynamism Matrix
 
 | Classification | % of Sectors | Examples                              | Policy Implication               |
@@ -131,6 +143,7 @@ Losers: States dependent on declining sectors with negative EDj
 | **Mature**     | 35%          | Food processing, Construction         | Efficiency improvements          |
 | **Static**     | 40%          | Traditional retail, Basic agriculture | Structural transformation needed |
 | **Transition** | 10%          | Textiles, Basic metals                | Critical intervention required   |
+
 
 📉 Shift-Share Decomposition (National Aggregate)
 
@@ -142,6 +155,7 @@ Losers: States dependent on declining sectors with negative EDj
 | **Inertial (EIj)**       | -240,000          | -10.0%          |
 
 Interpretation: Mexican economic growth 2003-2023 was driven primarily by competitive effects (EDj > 0) rather than favorable sectoral composition (EEj < 0), indicating efficiency gains in declining sectors.
+
 
 🔗 Technology-Competitiveness Correlation
 
@@ -160,6 +174,7 @@ Efficient Traditional (Low IACT, High EDj): 6 states
 Laggards (Low IACT, Low EDj): 10 states
 
 Absorption Failures (High IACT, Low EDj): 6 states (inefficient tech investment)
+
 
 # 📦 Requirements and Dependencies
 
@@ -180,6 +195,7 @@ from google.colab import drive
 Installation
 pip install pandas numpy seaborn matplotlib openpyxl
 
+
 🛠️ Usage
 
 Data Preparation: Place your census data Excel file in the working directory.
@@ -197,6 +213,7 @@ Excel files will be saved in the working directory.
 
 Visualizations will display inline and save as PNG files (300 DPI).
 
+
 📁 Output Structure
 
 outputs/
@@ -213,6 +230,7 @@ outputs/
 
 └── visualizaciones/              # PNG: heatmaps, scatter plots, bubbles
 
+
 # 🔑 Methodological Contributions
 
 Robust normalization: Year-relative standardization enables valid intertemporal comparisons despite inflation and methodological census changes
@@ -224,6 +242,7 @@ Multi-dimensional absorption: IACT combines endowment (stock) and absorption (fl
 Complete shift-share: Extends traditional two-component model to include inertial effects (EIj) for growth pace analysis
 
 Bubble diagnostics: Integrates sectoral size (employment) into technology-growth relationships, avoiding small-sector bias
+
 
 📚 Methodological References
 
@@ -243,6 +262,7 @@ Date: 2023-2024
 
 Data Source: INEGI, Economic Censuses 2003-2023
 
+
 📌 Key Insights from Analysis
 
 Productivity Comparability: PTF is normalized within each census year to eliminate inflation effects. Cross-year comparisons should use rankings, not absolute values.
@@ -260,4 +280,32 @@ EDj > 0: State outperforms national trend (competitive advantage).
 EEj > 0: State has favorable sectoral mix.
 
 EIj > 0: State growth momentum exceeds national average.
+
+
+## 📬 Professional Contact
+
+**Dr. Gilberto González Pérez**
+Economist | Economic Data Scientist | Industrial Strategy Consultant
+
+| Contact Method | Details |
+|----------------|---------|
+| 📧 Email | econggp@gmail.com | 
+| 📧 Academic Email | ggonzalez@correo.xoc.uam.mx |
+| 💼 LinkedIn | [Profile](https://www.linkedin.com/in/gilberto-gonz%C3%A1lez-p%C3%A9rez-a401b057) |
+| 📍 Location | Mexico City |
+| 🎓 Credentials | PhD Economics (UAM), Postdoc (UNAM) |
+
+**Availability:** Strategic consulting, industrial policy advising, applied research collaborations
+
+**Collaboration Interests:** Analytical frameworks for industrial policy, global value chain modeling, technological shock impact assessment on emerging labor markets.
+
+## 📄 License and Citation
+This work is licensed under the MIT License. If you use methodologies or code from this repository in academic research or consulting reports, please cite:
+González Pérez, G. (2024). Analytical Architecture for Regional Economic Dynamics: Integration of Spatial Econometrics, Machine Learning, and Agent-Based Modeling. Code repository: https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio
+
+## 📊 Featured Views
+
+<img width="855" height="556" alt="image" src="https://github.com/user-attachments/assets/9d3ee27a-337f-420f-a598-eb9b2e6b8220" />
+
+<img width="931" height="790" alt="image" src="https://github.com/user-attachments/assets/317fd6e1-9f2e-46c4-9fa9-7ec4f618db44" />
 
