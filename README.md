@@ -243,26 +243,6 @@ Complete shift-share: Extends traditional two-component model to include inertia
 
 Bubble diagnostics: Integrates sectoral size (employment) into technology-growth relationships, avoiding small-sector bias
 
-
-📚 Methodological References
-
-TFP calculation: Cobb-Douglas with sectoral elasticities (Syverson, 2011; OECD Productivity Manual)
-
-Location quotients: Isard (1960), extended with geographic concentration indices (Krugman, 1991)
-
-Shift-share: Dunn (1960), Esteban-Marquillas (1972) for differential effects
-
-Entropy indices: Shannon (1948), Pielou (1966) for equitability
-
-Technological absorption: Cohen & Levinthal (1990) - absorptive capacity theory
-
-Researcher: Analysis conducted for research on regional innovation systems and structural change
-
-Date: 2023-2024
-
-Data Source: INEGI, Economic Censuses 2003-2023
-
-
 📌 Key Insights from Analysis
 
 Productivity Comparability: PTF is normalized within each census year to eliminate inflation effects. Cross-year comparisons should use rankings, not absolute values.
@@ -281,6 +261,24 @@ EEj > 0: State has favorable sectoral mix.
 
 EIj > 0: State growth momentum exceeds national average.
 
+
+📚 Methodological References
+
+TFP calculation: Cobb-Douglas with sectoral elasticities (Syverson, 2011; OECD Productivity Manual)
+
+Location quotients: Isard (1960), extended with geographic concentration indices (Krugman, 1991)
+
+Shift-share: Dunn (1960), Esteban-Marquillas (1972) for differential effects
+
+Entropy indices: Shannon (1948), Pielou (1966) for equitability
+
+Technological absorption: Cohen & Levinthal (1990) - absorptive capacity theory
+
+Researcher: Analysis conducted for research on regional innovation systems and structural change
+
+Date: 2023-2024
+
+Data Source: INEGI, Economic Censuses 2003-2023
 
 ## 📬 Professional Contact
 
