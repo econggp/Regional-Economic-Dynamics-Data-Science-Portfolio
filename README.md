@@ -1,4 +1,4 @@
-🌟 Regional Innovation Trap Agent-Based Model (ABM)
+## 🌟 Regional Innovation Trap Agent-Based Model (ABM)
 
 This repository contains a comprehensive Python Agent-Based Model (ABM) for simulating regional economic divergence and innovation traps across Mexico's 32 states (2003-2023). The model integrates micro-level agent interactions, meso-level regional dynamics, and macro-level systemic analysis to understand technological lock-in and escape mechanisms.
 
