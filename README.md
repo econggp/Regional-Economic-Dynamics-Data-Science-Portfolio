@@ -302,3 +302,28 @@ Researcher: Agent-based computational economics for evolutionary regional develo
 
 Date: 2023-2024
 
+## 📬 Professional Contact
+
+**Dr. Gilberto González Pérez**
+Economist | Economic Data Scientist | Industrial Strategy Consultant
+
+| Contact Method | Details |
+|----------------|---------|
+| 📧 Email | econggp@gmail.com | 
+| 📧 Academic Email | ggonzalez@correo.xoc.uam.mx |
+| 💼 LinkedIn | [Profile](https://www.linkedin.com/in/gilberto-gonz%C3%A1lez-p%C3%A9rez-a401b057) |
+| 📍 Location | Mexico City |
+| 🎓 Credentials | PhD Economics (UAM), Postdoc (UNAM) |
+
+**Availability:** Strategic consulting, industrial policy advising, applied research collaborations
+
+**Collaboration Interests:** Analytical frameworks for industrial policy, global value chain modeling, technological shock impact assessment on emerging labor markets.
+
+## 📄 License and Citation
+This work is licensed under the MIT License. If you use methodologies or code from this repository in academic research or consulting reports, please cite:
+González Pérez, G. (2024). Analytical Architecture for Regional Economic Dynamics: Integration of Spatial Econometrics, Machine Learning, and Agent-Based Modeling. Code repository: https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio
+
+## 📊 Featured Views
+Regional Innovation Trajectories (2003-2063)
+<img width="5369" height="3540" alt="02_trayectorias_temporales (1)" src="https://github.com/user-attachments/assets/67a6ce05-fb05-4d11-95f6-db69c3f3e60d" />
+
