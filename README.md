@@ -55,7 +55,7 @@ All analyses leverage official Mexican microdata (INEGI SCIAN, Encuesta Industri
 ## 🔑 Core Analytical Modules
 
 ### 1. Spatial Intelligence Engine
-**Files**: `spatialpaneldata.R`, `shift_share.R`
+**Files**: `[spatialpaneldata.R](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/econggp-spatial/spatialpanel.R)`, `shift_share.R`
 
 Quantifies spillover effects across 32 federal entities and 19 sectors using contiguity matrices (W) and spatial autoregressive specifications.
 
