@@ -55,7 +55,7 @@ All analyses leverage official Mexican microdata (INEGI SCIAN, Encuesta Industri
 ## 🔑 Core Analytical Modules
 
 ### 1. Spatial Intelligence Engine
-**Files**: `[spatialpaneldata.R](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/econggp-spatial/spatialpanel.R)`, `shift_share.R`
+**Files**: [`[spatialpaneldata.R]`](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/econggp-spatial/spatialdatabase.R), [`shift_share.R`](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/econggp-spatial/shift_share.R)
 
 Quantifies spillover effects across 32 federal entities and 19 sectors using contiguity matrices (W) and spatial autoregressive specifications.
 
@@ -76,7 +76,7 @@ $$y_{it} = \rho W y_{it} + X_{it}\beta + W X_{it}\theta + \mu_i + \lambda_t + \v
 ---
 
 ### 2. Cognitive Externalities Index
-**Files**: `arci.py`, `indices_censos.py`
+**Files**: [`arci.py`](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/econggp-procesamiento_bases/arci.py), [`indices_censos.py`](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/econggp-procesamiento_bases/%C3%ADndices_censos.py)
 
 Proprietary algorithm measuring regional knowledge-diffusion capacity through:
 - Technological capability accumulation patterns (alternative index)
@@ -88,7 +88,7 @@ Proprietary algorithm measuring regional knowledge-diffusion capacity through:
 ---
 
 ### 3. Industrial Recomposition Tracker
-**Files**: `conglomerados.R`, `arbol_clasificacion_regional.R`
+**Files**: [`conglomerados.R`](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/main/conglomerados.R), [`análisis_clasificación.R`](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/econggp-conglomerados/an%C3%A1lisis_clasificaci%C3%B3n.R)
 
 Hybrid ML approach combining interpretability with predictive power:
 
@@ -107,8 +107,8 @@ Hybrid ML approach combining interpretability with predictive power:
 ---
 
 ### 4. Innovation Trap Simulator
-**File**: `abm_regional_trampa_innovacion.py`
-
+**File**: [`abm_regional_trampa_innovacion.py`
+](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/econggp-abm/abm_regional_trampa_innovacion.py)
 Agent-based model overcoming limitations of representative models by capturing **micro-heterogeneity** and **non-linearities** in technological learning.
 
 **Agent Architecture**:
@@ -213,4 +213,7 @@ González Pérez, G. (2024). Analytical Architecture for Regional Economic Dynam
 ## 📊 Featured Views
 Regional Innovation Trajectories (2003-2063)
 <img width="5369" height="3540" alt="02_trayectorias_temporales (1)" src="https://github.com/user-attachments/assets/67a6ce05-fb05-4d11-95f6-db69c3f3e60d" />
+
+Cluster Clasification (2003-2023)
+<img width="4200" height="2400" alt="alluvial_espectral" src="https://github.com/user-attachments/assets/bb7d43d6-e8d5-4dea-9f6c-326e9e2157f8" />
 
