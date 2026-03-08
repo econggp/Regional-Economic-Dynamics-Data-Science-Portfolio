@@ -1,809 +1,1182 @@
-# Manipulación de datos
-library(tidyverse)
-library(knitr)
+# =======================================================================
+# ANÁLISIS DE CONGLOMERADOS SECTOR-ENTIDAD: CAPACIDADES TECNOLÓGICAS
+# Y DERRAMAS DE CONOCIMIENTO EN MÉXICO (2003-2023)
+# Versión 2.0 | Actualizado y depurado
+# Autor: Gilberto González Pérez
+# =======================================================================
+
+# -----------------------------------------------------------------------
+# 0. PAQUETES
+# -----------------------------------------------------------------------
+
+packages <- c(
+  # Manipulación y visualización
+  "tidyverse", "knitr", "reshape2", "scales", "viridis",
+  "ggpubr", "ggcorrplot", "gghighlight", "fmsb", "gridExtra",
+  "kableExtra", "ggalluvial", "ggstream","fGarch",
+  # Estadística descriptiva
+  "psych", "broom", "car", "corrr", "janitor", "skimr", "naniar",
+  # PCA y clustering
+  "FactoMineR", "factoextra", "NbClust", "cluster", "mclust",
+  "kernlab", "dbscan", "fpc", "agricolae", "dunn.test",
+  # Multivariado y espacial
+  "vegan", "MASS", "sf", "spdep", "tmap",
+  # Otros
+  "igraph", "treemapify", "highcharter", "trelliscopejs"
+)
+
+# Instalar los que falten y cargar todos
+installed <- rownames(installed.packages())
+to_install <- packages[!packages %in% installed]
+if (length(to_install) > 0) install.packages(to_install, dependencies = TRUE)
+
+suppressPackageStartupMessages(
+  invisible(lapply(packages, library, character.only = TRUE))
+)
+
+# pairwiseAdonis desde GitHub si no está instalado
+if (!requireNamespace("pairwiseAdonis", quietly = TRUE)) {
+  if (!requireNamespace("devtools", quietly = TRUE)) install.packages("devtools")
+  devtools::install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
+}
+library(pairwiseAdonis)
+
+
+# -----------------------------------------------------------------------
+# 1. CARGA Y PREPARACIÓN DE DATOS
+# -----------------------------------------------------------------------
+
+data <- bin   
+
+data <- data %>% filter(!is.na(NOMGEO), !is.na(AE)) %>% na.omit()
+
+# Años disponibles (actualizado a 2023)
+cat("Años en la base:", sort(unique(data$tcode)), "\n")
+cat("Observaciones totales:", nrow(data), "\n")
+
 library(rpivotTable)
-library(reshape2)
-
-# Visualización
-library(ggpubr)
-library(ggcorrplot)
-library(gghighlight)
-library(fmsb)
-library(gridExtra)
-library(kableExtra)
-
-# Estadística descriptiva e inferencial
-library(psych)
-library(broom)
-library(car)
-library(corrr)
-
-
-# Gráficos especializados
-library(igraph)
-library(treemapify)
-library(highcharter)
-
-# Espacial
-library(janitor)
-library(skimr)
-library(naniar)
-
-# Datos
-
-data <- bin
-
-data <- na.omit(data)
-
 tgen<- rpivotTable(data, rows="NOMGEO", col="AE", aggregatorName="Average", 
                    vals="compacd")
 tgen
 
-
-
-### Robust scaling: presencia de outliers y alta heterogeneidad  
+# -----------------------------------------------------------------------
+# 2. ESTANDARIZACIÓN ROBUSTA
+# -----------------------------------------------------------------------
+# Uso de escalado robusto: mediana y RIC para manejar outliers
+# y alta heterogeneidad sectorial.
 
 robust_scale <- function(x) {
-  (x - median(x, na.rm = TRUE)) / IQR(x, na.rm = TRUE)
+  iqr <- IQR(x, na.rm = TRUE)
+  if (iqr == 0) return(rep(0, length(x)))           # BUG FIX: evitar NaN por IQR = 0
+  (x - median(x, na.rm = TRUE)) / iqr
 }
 
 data_std <- data %>%
   mutate(across(automa:ptf & where(is.numeric), robust_scale))
 
+# -----------------------------------------------------------------------
+# 3. ÍNDICES COMPUESTOS POR PCA (ICP, ICI, ICS)
+# -----------------------------------------------------------------------
+# Se ponderan los dos primeros componentes principales según su eigenvalor.
 
-### Determinación de los pesos para los índices de capacidades
-library(FactoMineR)
-
-# ICP
-
-iicp <- data_std[, c( "automa", "ecpacd", "ecppvs", 
-                    "eficap","ite"
-                  )]
-
-pca_icp <- PCA(iicp, graph = FALSE)
-
-
-# Ver contribuciones de cada variable
-library(factoextra)
-
-fviz_pca_var(pca_icp)
-
-get_eigenvalue(pca_icp)
-
-# Ver cargas factoriales del primer componente 
-pca_icp$var$coord %>% kable(., caption="ICP")
-
-data_std$ICP_dim1 <- pca_icp$ind$coord[, 1]
-data_std$ICP_dim2 <- pca_icp$ind$coord[, 2]
-
-eig_icp <- pca_icp$eig[1:2, "eigenvalue"]
-
-# Calcular ponderadores (proporción respecto a la suma de los dos)
-w_icp <- eig_icp / sum(eig_icp)
-
-# Crear el índice combinado
-data_std$ICP <- as.numeric(w_icp[1] * data_std$ICP_dim1 + w_icp[2] * data_std$ICP_dim2)
-
-
-# ICI
-
-iici <- data_std[, c("ecos", "sact","efene", "mbi", "roa")]
-
-pca_ici <- PCA(iici, graph = FALSE)
-
-# Ver contribuciones de cada variable
-fviz_pca_var(pca_ici)
-
-get_eigenvalue(pca_ici)
-
-# Ver cargas factoriales del primer componente 
-pca_ici$var$coord %>% kable(., caption="ICI")
-
-data_std$ICI_dim1 <- pca_ici$ind$coord[, 1]
-data_std$ICI_dim2 <- pca_ici$ind$coord[, 2]
-
-eig_ici <- pca_ici$eig[1:2, "eigenvalue"]
-
-# Calcular ponderadores (proporción respecto a la suma de los dos)
-w_ici <- eig_ici / sum(eig_ici)
-
-# Crear el índice combinado
-data_std$ICI <- as.numeric(w_ici[1] * data_std$ICI_dim1 + w_ici[2] * data_std$ICI_dim2)
-
-
-# ICS
-
-iics <- data_std[, c("cdig", "intal", "iact", 
-                     "ibl_pacd", "ibl_ppvs")]
-
-pca_ics <- PCA(iics, graph = FALSE)
-
-# Ver contribuciones de cada variable
-fviz_pca_var(pca_ics)
-
-get_eigenvalue(pca_ics)
-
-# Ver cargas factoriales del primer componente (el más importante)
-pca_ics$var$coord %>% kable(., caption="ICS")
-
-data_std$ICS_dim1 <- pca_ics$ind$coord[, 1]
-data_std$ICS_dim2 <- pca_ics$ind$coord[, 2]
-
-eig_ics <- pca_ics$eig[1:2, "eigenvalue"]
-
-# Calcular ponderadores (proporción respecto a la suma de los dos)
-w_ics <- eig_ics / sum(eig_ics)
-
-# Crear el índice combinado
-data_std$ICS <- as.numeric(w_ics[1] * data_std$ICS_dim1 + w_ics[2] * data_std$ICS_dim2)
-
-
-### Adecuación de base de datos
-
-caa <-  dplyr::select(data_std, NOMGEO, tcode, AE, ID, automa:ICS)
-
-vi <- c("ptf", "marppvs", "marpacd", "comppvs", "compacd", "ICP", "ICI", "ICS", "Qs_pacd", "Qs_ppvs")
-missing <- vi[!vi %in% names(caa)]
-if (length(missing) > 0) {
-  cat("Faltan:", missing, "\n")
+compute_pca_index <- function(data_std, variables, label) {
+  subset_data <- data_std[, variables]
+  
+  # Verificar varianza > 0 en todas las variables
+  var_check <- sapply(subset_data, function(x) var(x, na.rm = TRUE))
+  if (any(var_check < 1e-8)) {
+    warning("Variables con varianza casi cero eliminadas en ", label, ": ",
+            paste(names(var_check)[var_check < 1e-8], collapse = ", "))
+    subset_data <- subset_data[, var_check >= 1e-8, drop = FALSE]
+  }
+  
+  pca <- PCA(subset_data, graph = FALSE)
+  
+  eig_vals <- pca$eig[1:2, "eigenvalue"]
+  w <- eig_vals / sum(eig_vals)
+  
+  index <- as.numeric(w[1] * pca$ind$coord[, 1] + w[2] * pca$ind$coord[, 2])
+  
+  cat("\n--- PCA:", label, "---\n")
+  print(get_eigenvalue(pca)[1:3, ])
+  cat("Ponderadores dim1/dim2:", round(w, 4), "\n")
+  
+  list(index = index, pca = pca, weights = w)
 }
 
+# =======================================================================
+# VALIDACIÓN COMPLETA DEL EJERCICIO DE PCA
+# Índices ICP, ICI, ICS — Capacidades Tecnológicas México
+# =======================================================================
+# Cubre:
+#   1. Supuestos previos (KMO, Bartlett, correlaciones)
+#   2. Adecuación del modelo PCA
+#   3. Selección de componentes (eigenvalores, varianza explicada)
+#   4. Calidad de representación (comunalidades, cos2)
+#   5. Contribución de variables
+#   6. Ortogonalidad de componentes
+#   7. Estabilidad bootstrap
+#   8. Validez convergente/discriminante entre índices
+#   9. Reporte consolidado
+# =======================================================================
+
+# -----------------------------------------------------------------------
+# CONFIGURACIÓN GLOBAL
+# -----------------------------------------------------------------------
+
+dir.create("validacion_pca", showWarnings = FALSE)
+
+# Función auxiliar: guardar ggplot
+guardar <- function(p, nombre, w = 8, h = 5) {
+  ggsave(paste0("validacion_pca/", nombre, ".png"), p,
+         width = w, height = h, dpi = 150)
+  invisible(p)
+}
+
+# Definición de variables por índice
+vars_icp <- c("automa", "ecpacd", "ecppvs", "eficap", "ite")
+vars_ici <- c("ecos",   "sact",   "efene",  "mbi",   "roa")
+vars_ics <- c("cdig",   "intal",  "iact",   "ibl_pacd", "ibl_ppvs")
+
+indices <- list(
+  ICP = vars_icp,
+  ICI = vars_ici,
+  ICS = vars_ics
+)
+
+# -----------------------------------------------------------------------
+# FUNCIÓN MAESTRA DE VALIDACIÓN POR ÍNDICE
+# -----------------------------------------------------------------------
+
+validar_pca <- function(data_std, vars, label, n_comp = 2) {
+  
+  cat("\n", strrep("=", 60), "\n")
+  cat("  VALIDACIÓN PCA —", label, "\n")
+  cat(strrep("=", 60), "\n\n")
+  
+  # Subset limpio
+  df <- data_std[, vars] %>%
+    mutate(across(everything(), as.numeric)) %>%
+    filter(complete.cases(.))
+  
+  n  <- nrow(df)
+  p  <- ncol(df)
+  mat <- as.matrix(df)
+  
+  # ── 0. FIABILIDAD BÁSICA ──────────────────────────────────────────────
+  cat("── 0. Muestra y fiabilidad ─────────────────────────────\n")
+  cat("   n =", n, " | p =", p, " | ratio n/p =", round(n/p, 1), "\n")
+  if (n/p < 5)  warning("  ⚠  Ratio n/p < 5: muestra pequeña para PCA.")
+  if (n < 50)   warning("  ⚠  n < 50: interpretación con cautela.")
+  
+  # Alpha de Cronbach (cohesión interna de las variables del índice)
+  alpha_res <- tryCatch(psych::alpha(df)$total$raw_alpha, error = function(e) NA)
+  cat("   Alpha de Cronbach:", round(alpha_res, 3))
+  if (!is.na(alpha_res)) {
+    if (alpha_res >= 0.70) cat("  ✔  Aceptable (≥0.70)\n")
+    else if (alpha_res >= 0.60) cat("  ⚠  Marginal (0.60-0.70)\n")
+    else cat("  ✗  Bajo (<0.60): revisar composición del índice\n")
+  } else cat("\n")
+  
+  
+  # ── 1. SUPUESTO: CORRELACIONES ENTRE VARIABLES ────────────────────────
+  cat("\n── 1. Matriz de correlaciones ──────────────────────────\n")
+  R <- cor(mat, use = "complete.obs")
+  
+  # Determinante: cercano a 0 indica multicolinealidad alta (bueno para PCA)
+  det_R <- det(R)
+  cat("   Determinante |R|:", formatC(det_R, format = "e", digits = 4))
+  if (det_R < 0.00001) cat("  ✔  Multicolinealidad suficiente para PCA\n")
+  else if (det_R < 0.01) cat("  ✔  Correlaciones adecuadas\n")
+  else cat("  ⚠  Correlaciones débiles: PCA puede no ser informativo\n")
+  
+  # Visualización
+  p_corr <- ggcorrplot(R, hc.order = TRUE, type = "lower",
+                       lab = TRUE, lab_size = 3,
+                       colors = c("#C00000", "white", "#1F4E79"),
+                       title = paste("Matriz de correlaciones —", label)) +
+    theme(plot.title = element_text(face = "bold", size = 12))
+  guardar(p_corr, paste0("01_correlaciones_", label))
+  
+  
+  # ── 2. SUPUESTO: PRUEBA DE BARTLETT ──────────────────────────────────
+  cat("\n── 2. Prueba de esfericidad de Bartlett ────────────────\n")
+  bartlett <- tryCatch({
+    psych::cortest.bartlett(R, n = n)
+  }, error = function(e) NULL)
+  
+  if (!is.null(bartlett)) {
+    cat("   Chi-cuadrado:", round(bartlett$chisq, 2),
+        "| gl:", bartlett$df,
+        "| p-valor:", format(bartlett$p.value, scientific = TRUE), "\n")
+    if (bartlett$p.value < 0.05)
+      cat("   ✔  Rechaza H0 (R = I): las variables están correlacionadas. PCA es apropiado.\n")
+    else
+      cat("   ✗  No rechaza H0: variables independientes. PCA no recomendado.\n")
+  } else cat("   ⚠  No se pudo calcular Bartlett.\n")
+  
+  
+  # ── 3. SUPUESTO: KMO ─────────────────────────────────────────────────
+  cat("\n── 3. Índice KMO (Kaiser-Meyer-Olkin) ──────────────────\n")
+  kmo_res <- tryCatch(psych::KMO(mat), error = function(e) NULL)
+  
+  if (!is.null(kmo_res)) {
+    kmo_global <- kmo_res$MSA
+    cat("   KMO global:", round(kmo_global, 3))
+    kmo_label <- dplyr::case_when(
+      kmo_global >= 0.90 ~ "  ✔✔ Excelente",
+      kmo_global >= 0.80 ~ "  ✔  Muy bueno",
+      kmo_global >= 0.70 ~ "  ✔  Bueno",
+      kmo_global >= 0.60 ~ "  ⚠  Mediocre",
+      kmo_global >= 0.50 ~ "  ⚠  Miserable",
+      TRUE               ~ "  ✗  Inaceptable"
+    )
+    cat(kmo_label, "\n\n")
+    
+    kmo_vars <- data.frame(
+      Variable = names(kmo_res$MSAi),
+      KMO      = round(kmo_res$MSAi, 3)
+    ) %>% mutate(Evaluacion = dplyr::case_when(
+      KMO >= 0.80 ~ "Muy bueno",
+      KMO >= 0.70 ~ "Bueno",
+      KMO >= 0.60 ~ "Mediocre",
+      KMO >= 0.50 ~ "Miserable",
+      TRUE        ~ "Eliminar"
+    ))
+    print(kmo_vars)
+    
+    vars_problema <- kmo_vars$Variable[kmo_vars$KMO < 0.50]
+    if (length(vars_problema) > 0)
+      cat("\n   ⚠  Considerar eliminar:", paste(vars_problema, collapse = ", "), "\n")
+  }
+  
+  
+  # ── 4. PCA ────────────────────────────────────────────────────────────
+  cat("\n── 4. Ejecución del PCA ────────────────────────────────\n")
+  pca <- PCA(df, graph = FALSE)
+  
+  
+  # ── 5. EIGENVALORES Y VARIANZA EXPLICADA ──────────────────────────────
+  cat("\n── 5. Eigenvalores y varianza explicada ────────────────\n")
+  # pca$eig es una matriz: columnas "eigenvalue", "percentage of variance",
+  # "cumulative percentage of variance". Usar [ ] — nunca $ en matrices.
+  eig_mat  <- pca$eig
+  print(round(eig_mat, 3))
+  
+  n_kaiser <- sum(eig_mat[, "eigenvalue"] > 1)
+  cat("\n   Componentes con λ > 1 (criterio Kaiser):", n_kaiser, "\n")
+  
+  var_acum <- eig_mat[n_comp, "cumulative percentage of variance"]
+  cat("   Varianza explicada por", n_comp, "componentes:", round(var_acum, 1), "%")
+  if (var_acum >= 60) cat("  ✔\n") else cat("  ⚠  Por debajo del 60% recomendado\n")
+  
+  # Gráfico de sedimentación
+  p_scree <- fviz_eig(pca, addlabels = TRUE, ylim = c(0, 100),
+                      barfill = "#2E75B6", barcolor = "white",
+                      linecolor = "#C00000") +
+    geom_hline(yintercept = 100/p, linetype = "dashed",
+               color = "gray50", linewidth = 0.8) +
+    annotate("text", x = p - 0.5, y = 100/p + 1.5,
+             label = paste0("1/p = ", round(100/p, 1), "%"),
+             size = 3, color = "gray40") +
+    labs(title = paste("Gráfico de sedimentación —", label),
+         subtitle = paste0("Varianza acumulada (", n_comp, " comp.) = ",
+                           round(var_acum, 1), "%")) +
+    theme_minimal(base_size = 11)
+  guardar(p_scree, paste0("02_sedimentacion_", label))
+  
+  
+  # ── 6. CARGAS FACTORIALES (COORDENADAS) ───────────────────────────────
+  cat("\n── 6. Cargas factoriales (coordenadas en componentes) ──\n")
+  coords <- as.data.frame(pca$var$coord[, 1:n_comp])
+  colnames(coords) <- paste0("Dim.", 1:n_comp)
+  coords$Variable <- rownames(coords)
+  coords <- dplyr::select(coords, Variable, everything())
+  coords_print <- coords %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
+  print(coords_print)
+  
+  # Variables con carga baja en ambos componentes (posible candidata a eliminar)
+  max_carga <- apply(abs(pca$var$coord[, 1:n_comp]), 1, max)
+  vars_baja_carga <- names(max_carga)[max_carga < 0.40]
+  if (length(vars_baja_carga) > 0)
+    cat("\n   ⚠  Carga < 0.40 en todos los componentes seleccionados:",
+        paste(vars_baja_carga, collapse = ", "), "\n")
+  else
+    cat("\n   ✔  Todas las variables tienen carga ≥ 0.40 en al menos un componente\n")
+  
+  
+  # ── 7. COMUNALIDADES ──────────────────────────────────────────────────
+  cat("\n── 7. Comunalidades (cos² acumulado en", n_comp, "comp.) ─\n")
+  cos2_acum <- rowSums(pca$var$cos2[, 1:n_comp])
+  df_com <- data.frame(Variable = names(cos2_acum),
+                       Comunalidad = round(cos2_acum, 3)) %>%
+    mutate(Evaluacion = dplyr::case_when(
+      Comunalidad >= 0.70 ~ "✔  Bien representada",
+      Comunalidad >= 0.50 ~ "⚠  Representación media",
+      TRUE                ~ "✗  Mal representada"
+    ))
+  print(df_com)
+  
+  vars_mal_rep <- df_com$Variable[cos2_acum < 0.50]
+  if (length(vars_mal_rep) > 0)
+    cat("\n   ⚠  Mal representadas (cos² <0.50):",
+        paste(vars_mal_rep, collapse = ", "), "\n")
+  
+  
+  # ── 8. CONTRIBUCIONES ────────────────────────────────────────────────
+  cat("\n── 8. Contribución de variables a cada componente ──────\n")
+  contrib <- as.data.frame(pca$var$contrib[, 1:n_comp])
+  colnames(contrib) <- paste0("Contrib_Dim", 1:n_comp)
+  contrib$Variable <- rownames(contrib)
+  umbral <- 100 / p   # umbral uniforme
+  cat("   Umbral de contribución esperada (100/p):", round(umbral, 1), "%\n\n")
+  contrib_print <- contrib %>% mutate(across(where(is.numeric), ~ round(.x, 2)))
+  print(contrib_print)
+  
+  # Gráfico de contribuciones
+  p_contrib1 <- fviz_contrib(pca, choice = "var", axes = 1, top = p,
+                             fill = "#2E75B6", color = "white") +
+    labs(title = paste(label, "— Contribuciones Dim.1")) +
+    theme_minimal(base_size = 10)
+  
+  p_contrib2 <- fviz_contrib(pca, choice = "var", axes = 2, top = p,
+                             fill = "#C55A11", color = "white") +
+    labs(title = paste(label, "— Contribuciones Dim.2")) +
+    theme_minimal(base_size = 10)
+  
+  guardar(p_contrib1, paste0("03a_contribuciones_Dim1_", label))
+  guardar(p_contrib2, paste0("03b_contribuciones_Dim2_", label))
+  
+  
+  # ── 9. BIPLOT ──────────────────────────────────────────────────────────
+  cat("\n── 9. Biplot ────────────────────────────────────────────\n")
+  p_biplot <- fviz_pca_biplot(
+    pca,
+    col.var    = "#C00000",
+    col.ind    = "cos2",
+    gradient.cols = c("#AAAAAA", "#2E75B6", "#1F4E79"),
+    repel      = TRUE,
+    label      = "var",
+    alpha.ind  = 0.4,
+    title      = paste("Biplot PCA —", label)
+  ) + theme_minimal(base_size = 10)
+  guardar(p_biplot, paste0("04_biplot_", label), w = 8, h = 7)
+  
+  
+  # ── 10. ORTOGONALIDAD DE COMPONENTES ─────────────────────────────────
+  cat("\n── 10. Ortogonalidad de componentes ────────────────────\n")
+  scores      <- pca$ind$coord[, 1:n_comp]
+  cor_scores  <- cor(scores)
+  off_diag    <- cor_scores[upper.tri(cor_scores)]
+  max_corr    <- max(abs(off_diag))
+  cat("   Correlación máxima entre componentes:", round(max_corr, 4))
+  if (max_corr < 0.01)
+    cat("  ✔  Perfectamente ortogonales (esperado en PCA)\n")
+  else
+    cat("  ⚠  Componentes no completamente ortogonales\n")
+  
+  
+  # ── 11. PONDERADORES Y CONSTRUCCIÓN DEL ÍNDICE ────────────────────────
+  cat("\n── 11. Ponderadores y construcción del índice ──────────\n")
+  eig_vals <- pca$eig[1:n_comp, "eigenvalue"]
+  w        <- eig_vals / sum(eig_vals)
+  cat("   Eigenvalores usados:", paste(round(eig_vals, 3), collapse = " | "), "\n")
+  cat("   Ponderadores (w1, w2):", paste(round(w, 4), collapse = " | "), "\n")
+  cat("   Suma ponderadores:", round(sum(w), 6), "  ✔\n")
+  
+  index <- as.numeric(w[1] * pca$ind$coord[, 1] + w[2] * pca$ind$coord[, 2])
+  
+  
+  # ── 12. DISTRIBUCIÓN DEL ÍNDICE ────────────────────────────────────────
+  cat("\n── 12. Distribución del índice ─────────────────────────\n")
+  cat("   Min:", round(min(index), 3), "| Mediana:", round(median(index), 3),
+      "| Max:", round(max(index), 3), "| SD:", round(sd(index), 3), "\n")
+  
+  # Test de normalidad (Shapiro en muestra aleatoria si n > 5000)
+  n_test  <- min(n, 4999)
+  set.seed(42)
+  muestra <- sample(index, n_test)
+  sw      <- shapiro.test(muestra)
+  cat("   Shapiro-Wilk (n=", n_test, "): W =", round(sw$statistic, 4),
+      "| p =", format(sw$p.value, scientific = TRUE))
+  if (sw$p.value > 0.05) cat("  ✔  No rechaza normalidad\n")
+  else cat("  ⚠  Rechaza normalidad — usar interpretación no paramétrica\n")
+  
+  p_hist <- ggplot(data.frame(idx = index), aes(idx)) +
+    geom_histogram(aes(y = after_stat(density)), bins = 40,
+                   fill = "#2E75B6", color = "white", alpha = 0.8) +
+    geom_density(color = "#C00000", linewidth = 1) +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    labs(title = paste("Distribución del índice", label),
+         x = label, y = "Densidad") +
+    theme_minimal(base_size = 11)
+  guardar(p_hist, paste0("05_distribucion_", label))
+  
+  
+  # ── 13. ESTABILIDAD BOOTSTRAP ─────────────────────────────────────────
+  cat("\n── 13. Estabilidad bootstrap de cargas (B = 200) ───────\n")
+  set.seed(56)
+  B       <- 200
+  n_boot  <- min(n, nrow(mat))
+  cargas_boot <- matrix(NA, nrow = B, ncol = p,
+                        dimnames = list(NULL, vars))
+  
+  for (b in seq_len(B)) {
+    idx_b  <- sample(seq_len(n_boot), n_boot, replace = TRUE)
+    pca_b  <- tryCatch(
+      PCA(as.data.frame(mat[idx_b, ]), graph = FALSE),
+      error = function(e) NULL
+    )
+    if (!is.null(pca_b)) {
+      # Alinear signo: correlacionar con primera carga original
+      carga_orig <- pca$var$coord[, 1]
+      carga_b    <- pca_b$var$coord[, 1]
+      if (cor(carga_orig, carga_b) < 0) carga_b <- -carga_b
+      cargas_boot[b, ] <- carga_b
+    }
+  }
+  
+  cargas_boot <- na.omit(cargas_boot)
+  boot_summary <- data.frame(
+    Variable  = vars,
+    Carga_PCA = round(pca$var$coord[, 1], 3),
+    Media_Boot = round(colMeans(cargas_boot), 3),
+    SD_Boot    = round(apply(cargas_boot, 2, sd), 3),
+    IC_Bajo    = round(apply(cargas_boot, 2, quantile, 0.025), 3),
+    IC_Alto    = round(apply(cargas_boot, 2, quantile, 0.975), 3)
+  ) %>%
+    mutate(Estable = IC_Bajo * IC_Alto > 0)   # IC no cruza cero → estable
+  
+  print(boot_summary)
+  inestables <- boot_summary$Variable[!boot_summary$Estable]
+  if (length(inestables) > 0)
+    cat("\n   ⚠  Cargas inestables (IC cruza cero):",
+        paste(inestables, collapse = ", "), "\n")
+  else
+    cat("\n   ✔  Todas las cargas son estables (IC no cruza cero)\n")
+  
+  # Gráfico de intervalos bootstrap
+  p_boot <- ggplot(boot_summary, aes(x = reorder(Variable, Carga_PCA),
+                                     y = Carga_PCA, color = Estable)) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = IC_Bajo, ymax = IC_Alto), width = 0.3) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    scale_color_manual(values = c("TRUE" = "#375623", "FALSE" = "#C00000"),
+                       labels = c("TRUE" = "Estable", "FALSE" = "Inestable")) +
+    coord_flip() +
+    labs(title = paste("Estabilidad bootstrap de cargas Dim.1 —", label),
+         subtitle = "Intervalos de confianza al 95% (B = 200)",
+         x = "", y = "Carga factorial", color = "") +
+    theme_minimal(base_size = 11)
+  guardar(p_boot, paste0("06_bootstrap_", label))
+  
+  
+  # ── RESULTADO FINAL ────────────────────────────────────────────────────
+  cat("\n── RESUMEN ─────────────────────────────────────────────\n")
+  puntos_ok <- c(
+    bartlett$p.value < 0.05,
+    !is.na(kmo_global) && kmo_global >= 0.60,
+    var_acum >= 60,
+    all(cos2_acum >= 0.50),
+    all(boot_summary$Estable)
+  )
+  criterios <- c("Bartlett p<0.05", "KMO≥0.60",
+                 "Varianza≥60%", "Comunalidades≥0.50", "Bootstrap estable")
+  for (i in seq_along(criterios))
+    cat("  ", if (puntos_ok[i]) "✔" else "✗", criterios[i], "\n")
+  
+  cat("\n  Criterios superados:", sum(puntos_ok), "/", length(puntos_ok), "\n")
+  if (sum(puntos_ok) == length(puntos_ok))
+    cat("  → PCA VÁLIDO Y ROBUSTO ✔✔\n")
+  else if (sum(puntos_ok) >= 4)
+    cat("  → PCA ACEPTABLE con reservas menores ✔\n")
+  else
+    cat("  → REVISAR EL PCA: múltiples criterios fallidos ✗\n")
+  
+  # Devolver objetos útiles
+  invisible(list(
+    label       = label,
+    pca         = pca,
+    index       = index,
+    kmo         = kmo_global,
+    bartlett    = bartlett,
+    varianza    = var_acum,
+    comunalidades = cos2_acum,
+    ponderadores  = w,
+    boot_summary  = boot_summary,
+    criterios_ok  = puntos_ok
+  ))
+}
+
+
+# -----------------------------------------------------------------------
+# EJECUTAR VALIDACIÓN PARA LOS TRES ÍNDICES
+# -----------------------------------------------------------------------
+
+resultados_val <- lapply(names(indices), function(lbl) {
+  validar_pca(data_std, vars = indices[[lbl]], label = lbl, n_comp = 2)
+})
+names(resultados_val) <- names(indices)
+
+# =======================================================================
+# DIAGNÓSTICO Y MEJORA DE LOS ÍNDICES ICP / ICI / ICS
+# =======================================================================
+# Organización:
+#   NIVEL 1 — Correcciones inmediatas (Alpha, variables problemáticas)
+#   NIVEL 2 — Reestructuración de los índices (análisis paralelo, rotación)
+#   NIVEL 3 — Alternativas al PCA exploratorio
+# =======================================================================
+
+dir.create("mejora_pca", showWarnings = FALSE)
+
+guardar <- function(p, nombre, w = 8, h = 5)
+  ggsave(paste0("mejora_pca/", nombre, ".png"), p, width = w, height = h, dpi = 150)
+
+# -----------------------------------------------------------------------
+# DEFINICIÓN ORIGINAL
+# -----------------------------------------------------------------------
+vars_icp_orig <- c("automa", "ecpacd", "ecppvs", "eficap", "ite")
+vars_ici_orig <- c("ecos",   "sact",   "efene",  "mbi",   "roa")
+vars_ics_orig <- c("cdig",   "intal",  "iact",   "ibl_pacd", "ibl_ppvs")
+
+todas_vars <- c(vars_icp_orig, vars_ici_orig, vars_ics_orig)
+
+
+# =======================================================================
+# NIVEL 1 — CORRECCIONES INMEDIATAS
+# =======================================================================
+
+cat("\n", strrep("═", 60), "\n")
+cat("  NIVEL 1 — CORRECCIONES INMEDIATAS\n")
+cat(strrep("═", 60), "\n")
+
+
+# ── 1A. Alpha de Cronbach CORRECTO (check.keys = TRUE) ────────────────
+
+cat("\n── 1A. Alpha de Cronbach con check.keys = TRUE ─────────\n")
+
+alpha_correcto <- function(df_vars, label) {
+  df <- data_std[, df_vars]
+  res <- psych::alpha(df, check.keys = TRUE)
+  a   <- res$total$raw_alpha
+  cat(sprintf("  %-5s → Alpha = %.3f", label, a))
+  if      (a >= 0.70) cat("  ✔  Aceptable\n")
+  else if (a >= 0.60) cat("  ⚠  Marginal\n")
+  else                cat("  ✗  Bajo — las variables no forman una escala coherente\n")
+  invisible(res)
+}
+
+alpha_correcto(vars_icp_orig, "ICP")
+alpha_correcto(vars_ici_orig, "ICI")
+alpha_correcto(vars_ics_orig, "ICS")
+
+# ── 1B. Correlaciones internas detalladas ─────────────────────────────
+# Permite ver exactamente qué pares de variables "tiran" en sentidos distintos.
+
+cat("\n── 1B. Diagnóstico de correlaciones internas ───────────\n")
+
+diagnostico_correlaciones <- function(df_vars, label) {
+  df  <- data_std[, df_vars]
+  R   <- cor(df, use = "complete.obs")
+  det <- det(R)
+  
+  # Pares con correlación negativa fuerte (|r| > 0.20 y negativa)
+  pares_neg <- which(R < -0.20 & lower.tri(R), arr.ind = TRUE)
+  
+  cat("\n  Índice:", label,
+      "| Determinante:", round(det, 4),
+      "| Correlación media:", round(mean(abs(R[lower.tri(R)])), 3), "\n")
+  
+  if (nrow(pares_neg) > 0) {
+    cat("  ⚠  Pares con correlación negativa (|r|>0.20):\n")
+    for (i in seq_len(nrow(pares_neg))) {
+      r1 <- rownames(R)[pares_neg[i, 1]]
+      r2 <- colnames(R)[pares_neg[i, 2]]
+      cat(sprintf("     %s ↔ %s : r = %.3f\n", r1, r2, R[r1, r2]))
+    }
+  } else {
+    cat("  ✔  Sin correlaciones negativas fuertes\n")
+  }
+  
+  p <- ggcorrplot(R, hc.order = TRUE, type = "lower", lab = TRUE,
+                  lab_size = 3.5,
+                  colors = c("#C00000", "white", "#1F4E79"),
+                  title = paste("Correlaciones internas —", label))
+  guardar(p, paste0("1b_corr_", label))
+}
+
+diagnostico_correlaciones(vars_icp_orig, "ICP")
+diagnostico_correlaciones(vars_ici_orig, "ICI")
+diagnostico_correlaciones(vars_ics_orig, "ICS")
+
+
+# ── 1C. Eliminar variables KMO < 0.50 y re-evaluar ───────────────────
+# Basado en los resultados de la validación:
+#   ICP: eliminar ecpacd, eficap (KMO < 0.50)
+#   ICI: eliminar roa (KMO < 0.50)
+#   ICS: eliminar cdig, intal, ibl_pacd, ibl_ppvs (KMO < 0.50)
+#        OJO: eliminar ibl_pacd e ibl_ppvs deja ICS con muy pocas vars
+#        → solo eliminar intal (KMO = 0.269, la más baja)
+
+cat("\n── 1C. KMO post-eliminación de variables problemáticas ─\n")
+
+vars_icp_v2 <- c("automa", "ecppvs", "ite")          # eliminados: ecpacd, eficap
+vars_ici_v2 <- c("ecos", "sact", "efene", "mbi")     # eliminado: roa
+vars_ics_v2 <- c("cdig", "iact", "ibl_pacd", "ibl_ppvs")  # eliminado: intal
+
+re_kmo <- function(df_vars, label) {
+  df  <- data_std[, df_vars]
+  kmo <- psych::KMO(as.matrix(df))
+  cat(sprintf("  %-8s → KMO global: %.3f  (variables: %s)\n",
+              label, kmo$MSA, paste(df_vars, collapse = ", ")))
+  kmo
+}
+
+cat("\n  Versiones reducidas:\n")
+re_kmo(vars_icp_v2, "ICP_v2")
+re_kmo(vars_ici_v2, "ICI_v2")
+re_kmo(vars_ics_v2, "ICS_v2")
+
+
+# =======================================================================
+# NIVEL 2 — REESTRUCTURACIÓN DE LOS ÍNDICES
+# =======================================================================
+
+cat("\n\n", strrep("═", 60), "\n")
+cat("  NIVEL 2 — REESTRUCTURACIÓN\n")
+cat(strrep("═", 60), "\n")
+
+
+# ── 2A. Análisis paralelo (determinar número real de factores) ─────────
+# El análisis paralelo compara los eigenvalores observados con los
+# esperados bajo datos aleatorios. Es más fiable que el criterio Kaiser.
+
+cat("\n── 2A. Análisis paralelo por índice ────────────────────\n")
+
+paralelo <- function(df_vars, label) {
+  df  <- data_std[, df_vars]
+  cat("\n  Análisis paralelo —", label, "\n")
+  # fa.parallel: usa tanto PCA como FA para determinar n de factores/componentes
+  ap <- psych::fa.parallel(df, fa = "pc", plot = FALSE, n.iter = 200,
+                           sim = TRUE, error.bars = FALSE,
+                           fm = "ml", main = paste("Paralelo", label))
+  cat("  → Número sugerido de componentes PCA:", ap$ncomp, "\n")
+  cat("  → Número sugerido de factores  FA:  ", ap$nfact, "\n")
+  invisible(ap)
+}
+
+ap_icp <- paralelo(vars_icp_orig, "ICP")
+ap_ici <- paralelo(vars_ici_orig, "ICI")
+ap_ics <- paralelo(vars_ics_orig, "ICS")
+
+
+# ── 2B. PCA con rotación Varimax ──────────────────────────────────────
+# Cuando hay más de un componente, Varimax mejora la interpretabilidad
+# al maximizar la varianza de las cargas al cuadrado → cargas más claras.
+# Usar cuando el análisis paralelo sugiere ≥ 2 componentes.
+
+cat("\n── 2B. PCA con rotación Varimax ────────────────────────\n")
+
+pca_varimax <- function(df_vars, label, n_comp = 2) {
+  df  <- data_std[, df_vars]
+  mat <- as.matrix(df)
+  
+  # PCA base
+  pca <- prcomp(mat, scale. = TRUE)
+  
+  # Rotación Varimax sobre los primeros n_comp componentes
+  rot <- varimax(pca$rotation[, 1:n_comp])
+  
+  cargas_rot <- as.data.frame(rot$loadings[, 1:n_comp])
+  colnames(cargas_rot) <- paste0("Factor", 1:n_comp)
+  cargas_rot$Variable <- rownames(cargas_rot)
+  
+  cat("\n  Cargas rotadas (Varimax) —", label, "\n")
+  print(cargas_rot %>%
+          mutate(across(where(is.numeric), ~ round(.x, 3))) %>%
+          dplyr::select(Variable, everything()))
+  
+  # Varianza explicada por cada factor rotado
+  var_exp <- colSums(rot$loadings^2) / nrow(rot$loadings) * 100
+  cat("  Varianza por factor rotado:", paste(round(var_exp, 1), collapse = "% | "), "%\n")
+  
+  invisible(list(pca = pca, rot = rot, cargas = cargas_rot))
+}
+
+rot_icp <- pca_varimax(vars_icp_orig, "ICP", n_comp = 2)
+rot_ici <- pca_varimax(vars_ici_orig, "ICI", n_comp = 2)
+rot_ics <- pca_varimax(vars_ics_orig, "ICS", n_comp = 2)
+
+
+# ── 2C. PCA global sobre las 15 variables ────────────────────────────
+# Si las variables originales no se agrupan limpiamente en 3 índices,
+# el PCA global revela la estructura factorial real de los datos.
+# Esto puede sugerir una reasignación de variables a índices.
+
+cat("\n── 2C. PCA global — estructura factorial real ──────────\n")
+
+df_global <- data_std[, todas_vars]
+pca_global <- PCA(df_global, graph = FALSE)
+
+cat("\n  Eigenvalores globales:\n")
+print(round(pca_global$eig[pca_global$eig[, "eigenvalue"] > 1, ], 3))
+
+cat("\n  Análisis paralelo global:\n")
+ap_global <- psych::fa.parallel(df_global, fa = "pc", plot = FALSE,
+                                n.iter = 200, sim = TRUE)
+cat("  → Componentes sugeridos:", ap_global$ncomp, "\n")
+cat("  → Factores sugeridos:   ", ap_global$nfact, "\n")
+
+# Cargas en los primeros 3-4 componentes globales
+n_glob <- min(ap_global$ncomp, 4)
+cargas_glob <- as.data.frame(pca_global$var$coord[, 1:n_glob])
+colnames(cargas_glob) <- paste0("G", 1:n_glob)
+cargas_glob$Variable <- rownames(cargas_glob)
+cargas_glob$Indice_orig <- case_when(
+  cargas_glob$Variable %in% vars_icp_orig ~ "ICP",
+  cargas_glob$Variable %in% vars_ici_orig ~ "ICI",
+  TRUE ~ "ICS"
+)
+
+cat("\n  Cargas globales (primeros", n_glob, "componentes):\n")
+print(cargas_glob %>%
+        mutate(across(where(is.numeric), ~ round(.x, 3))) %>%
+        dplyr::select(Indice_orig, Variable, everything()) %>%
+        arrange(Indice_orig))
+
+# Heatmap de cargas globales
+cargas_long <- cargas_glob %>%
+  pivot_longer(cols = starts_with("G"),
+               names_to = "Componente", values_to = "Carga")
+
+p_cargas_glob <- ggplot(cargas_long,
+                        aes(x = Componente, y = Variable, fill = Carga)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(Carga, 2)), size = 3) +
+  scale_fill_gradient2(low = "#C00000", mid = "white", high = "#1F4E79",
+                       midpoint = 0, limits = c(-1, 1)) +
+  facet_grid(Indice_orig ~ ., scales = "free_y", space = "free") +
+  labs(title = "Cargas en PCA global (15 variables)",
+       subtitle = "Agrupación original resaltada por faceta",
+       x = "Componente global", y = "") +
+  theme_minimal(base_size = 10) +
+  theme(strip.text.y = element_text(angle = 0, face = "bold"))
+
+p_cargas_glob
+
+guardar(p_cargas_glob, "2c_cargas_pca_global", w = 7, h = 8)
+
+cat("\n  → Si variables de índices distintos cargan en el mismo componente,\n")
+cat("    la agrupación teórica no coincide con la estructura empírica.\n")
+cat("    Ver: mejora_pca/2c_cargas_pca_global.png\n")
+
+
+# =======================================================================
+# NIVEL 3 — ALTERNATIVAS AL PCA EXPLORATORIO
+# =======================================================================
+
+cat("\n\n", strrep("═", 60), "\n")
+cat("  NIVEL 3 — ALTERNATIVAS AL PCA EXPLORATORIO\n")
+cat(strrep("═", 60), "\n")
+
+
+# ── 3A. Índice por media ponderada por correlación (sin PCA) ──────────
+# Cuando las variables no comparten un factor latente fuerte, una
+# alternativa robusta es ponderar cada variable por su correlación
+# promedio con las demás dentro del índice.
+# Esta ponderación tiene justificación teórica (mayor coherencia interna
+# → mayor peso) y no depende de supuestos del PCA.
+
+cat("\n── 3A. Índice ponderado por correlación media ──────────\n")
+
+indice_pond_corr <- function(df_vars, label) {
+  df   <- data_std[, df_vars]
+  R    <- cor(df, use = "complete.obs")
+  
+  # Correlación media de cada variable con las demás (sin contar consigo misma)
+  cor_media <- (colSums(abs(R)) - 1) / (ncol(R) - 1)
+  w_corr    <- cor_media / sum(cor_media)
+  
+  cat(sprintf("\n  Ponderadores por correlación media — %s:\n", label))
+  df_w <- data.frame(Variable = names(w_corr),
+                     Cor_media = round(cor_media, 3),
+                     Peso = round(w_corr, 3))
+  print(df_w)
+  
+  index <- as.numeric(as.matrix(df) %*% w_corr)
+  cat("  → Índice: Min =", round(min(index), 2),
+      "| Mediana =", round(median(index), 2),
+      "| Max =", round(max(index), 2), "\n")
+  
+  list(index = index, pesos = w_corr, df_pesos = df_w)
+}
+
+ind_icp_corr <- indice_pond_corr(vars_icp_orig, "ICP")
+ind_ici_corr <- indice_pond_corr(vars_ici_orig, "ICI")
+ind_ics_corr <- indice_pond_corr(vars_ics_orig, "ICS")
+
+
+# ── 3B. Análisis Factorial Confirmatorio (AFC) ────────────────────────
+# Si la agrupación de variables en ICP/ICI/ICS tiene respaldo teórico
+# sólido, el AFC prueba si el modelo de medida es consistente con datos.
+# Requiere el paquete lavaan.
+
+cat("\n── 3B. Análisis Factorial Confirmatorio (AFC) ──────────\n")
+
+if (!requireNamespace("lavaan", quietly = TRUE)) install.packages("lavaan")
+library(lavaan)
+
+# Modelo teórico: cada índice es un factor latente
+modelo_cfa <- "
+  ICP =~ automa + ecpacd + ecppvs + eficap + ite
+  ICI =~ ecos   + sact   + efene  + mbi    + roa
+  ICS =~ cdig   + intal  + iact   + ibl_pacd + ibl_ppvs
+"
+
+df_cfa <- as.data.frame(data_std[, todas_vars])
+
+fit_cfa <- tryCatch(
+  lavaan::cfa(modelo_cfa, data = df_cfa,
+              estimator = "MLR",      # robusto a no normalidad
+              std.lv = TRUE),
+  error = function(e) { cat("  ✗ AFC no convergió:", e$message, "\n"); NULL }
+)
+
+if (!is.null(fit_cfa)) {
+  fit_idx <- lavaan::fitMeasures(fit_cfa,
+                                 c("chisq", "df", "pvalue", "cfi", "tli", "rmsea", "srmr"))
+  
+  cat("\n  Índices de ajuste del AFC:\n")
+  cat(sprintf("  Chi²(df=%g) = %.1f  p = %.4f\n",
+              fit_idx["df"], fit_idx["chisq"], fit_idx["pvalue"]))
+  cat(sprintf("  CFI = %.3f  (≥0.95 = buen ajuste)\n",  fit_idx["cfi"]))
+  cat(sprintf("  TLI = %.3f  (≥0.95 = buen ajuste)\n",  fit_idx["tli"]))
+  cat(sprintf("  RMSEA = %.3f  (≤0.06 = buen ajuste)\n", fit_idx["rmsea"]))
+  cat(sprintf("  SRMR  = %.3f  (≤0.08 = buen ajuste)\n", fit_idx["srmr"]))
+  
+  if (fit_idx["cfi"] >= 0.95 && fit_idx["rmsea"] <= 0.06) {
+    cat("\n  ✔  El modelo AFC ajusta bien — la agrupación teórica es válida.\n")
+    cat("     Recomendación: usar las cargas del AFC como ponderadores.\n")
+  } else {
+    cat("\n  ✗  El modelo AFC NO ajusta bien.\n")
+    cat("     Implicación: la agrupación teórica no está respaldada por los datos.\n")
+    cat("     → Solicitar índices de modificación para reasignar variables.\n")
+    
+    # Índices de modificación (sugerencias de reasignación)
+    mi <- lavaan::modindices(fit_cfa, sort = TRUE, maximum.number = 10)
+    cat("\n  Top 10 índices de modificación (reasignaciones sugeridas):\n")
+    print(mi[mi$op == "=~", c("lhs", "op", "rhs", "mi", "epc")])
+  }
+  
+  # Cargas estandarizadas del AFC
+  cat("\n  Cargas estandarizadas del AFC:\n")
+  cargas_afc <- lavaan::standardizedSolution(fit_cfa) %>%
+    filter(op == "=~") %>%
+    dplyr::select(Factor = lhs, Variable = rhs,
+                  Carga = est.std, SE = se, pvalue)
+  print(cargas_afc %>% mutate(across(where(is.numeric), ~ round(.x, 3))))
+}
+
+
+# ── 3C. Comparación de índices: PCA vs Correlación vs AFC ─────────────
+
+cat("\n── 3C. Correlación entre métodos de construcción ───────\n")
+
+# PCA 
+robust_scale <- function(x) {
+  iqr <- IQR(x, na.rm = TRUE)
+  if (iqr == 0) return(rep(0, length(x)))
+  (x - median(x, na.rm = TRUE)) / iqr
+}
+
+# Función PCA estándar
+pca_index <- function(df_vars) {
+  df  <- data_std[, df_vars]
+  pca <- PCA(df, graph = FALSE)
+  w   <- pca$eig[1:2, "eigenvalue"] / sum(pca$eig[1:2, "eigenvalue"])
+  as.numeric(w[1] * pca$ind$coord[, 1] + w[2] * pca$ind$coord[, 2])
+}
+
+icp_pca  <- pca_index(vars_icp_orig)
+ici_pca  <- pca_index(vars_ici_orig)
+ics_pca  <- pca_index(vars_ics_orig)
+
+icp_corr <- ind_icp_corr$index
+ici_corr <- ind_ici_corr$index
+ics_corr <- ind_ics_corr$index
+
+comparacion <- data.frame(
+  Indice  = c("ICP", "ICI", "ICS"),
+  r_PCA_Corr = c(
+    round(cor(icp_pca, icp_corr), 3),
+    round(cor(ici_pca, ici_corr), 3),
+    round(cor(ics_pca, ics_corr), 3)
+  )
+)
+
+cat("\n  Correlación entre índice por PCA y por ponderación de correlación:\n")
+print(comparacion)
+cat("\n  Si r > 0.90: los dos métodos son equivalentes → usar el más simple.\n")
+cat("  Si r < 0.70: los métodos divergen → revisar cuál tiene mejor\n")
+cat("               respaldo teórico y estadístico.\n")
+
+
+# -----------------------------------------------------------------------
+# 4. PREPARACIÓN DE BASE PARA CLUSTERING
+# -----------------------------------------------------------------------
+# Reestructuración de variables por índice
+
+vars_icp <- c("automa", "iact", "ibl_pot")
+vars_ici <- c("ecos", "efene", "mbi" )
+vars_ics <- c("cdig", "intal", "ite")
+
+indices <- list(
+  ICP = vars_icp,
+  ICI = vars_ici,
+  ICS = vars_ics
+)
+
+res_icp  <- compute_pca_index(data_std, vars_icp, "ICP")
+data_std$ICP <- res_icp$index
+
+res_ici  <- compute_pca_index(data_std, vars_ici, "ICI")
+data_std$ICI <- res_ici$index
+
+res_ics  <- compute_pca_index(data_std, vars_ics, "ICS")
+data_std$ICS <- res_ics$index
+
+
+resultados_val <- lapply(names(indices), function(lbl) {
+  validar_pca(data_std, vars = indices[[lbl]], label = lbl, n_comp = 2)
+})
+names(resultados_val) <- names(indices)
+
+
+# Variables de interés para clustering
+vi <- c("ptf", "marpot","compot",
+        "ICP", "ICI", "ICS", "Qs_pot")
+
+# Verificar que todas existen
+missing_vi <- vi[!vi %in% names(data_std)]
+if (length(missing_vi) > 0) stop("Faltan variables: ", paste(missing_vi, collapse = ", "))
+
+caa <- dplyr::select(data_std, NOMGEO, tcode, AE, ID, all_of(vi))
 caa_split <- split(caa, caa$tcode)
 
+cat("\nAños disponibles para clustering:", names(caa_split), "\n")
+cat("Observaciones por año:\n")
+sapply(caa_split, nrow) %>% print()
 
-# ==================
-###### Conglomerados
 
-library(dbscan)      # para dbscan y kNNdistplot
-library(fpc)         # para calinhara y cluster.stats
-library(tidyr)  
-library(NbClust)
+# -----------------------------------------------------------------------
+# 5. DETERMINACIÓN DEL NÚMERO ÓPTIMO DE CLUSTERS
+# -----------------------------------------------------------------------
 
-# Crear carpeta para resultados
 dir.create("resultados_clusters", showWarnings = FALSE)
 
-# 1. Método del codo
-# ---------
-
-# Bucle sobre cada año
-for (ano in names(caa_split)) {
-  message("Procesando año: ", ano)
+# Función unificada para WSS + Silueta
+evaluar_k_optimo <- function(df_ano, vars, k_max = 10, seed = 56) {
   
-  tryCatch({
-    datos_ano <- caa_split[[ano]]
-    datos_cluster <- datos_ano %>% dplyr::select(all_of(vi))
-    
-    # Verificaciones
-    if (nrow(datos_cluster) < 2) {
-      warning("Año ", ano, " tiene menos de 2 filas. Se omite.")
-      next
-    }
-    if (any(!sapply(datos_cluster, is.numeric))) {
-      stop("Variables no numéricas")
-    }
-    if (any(!is.finite(as.matrix(datos_cluster)))) {
-      stop("Valores no finitos")
-    }
-    
-    # Convertir a matriz (importante para dist)
-    datos_matrix <- as.matrix(datos_cluster)
-    
-    # --- WSS para k=1 a 10 ---
-    set.seed(56)
-    wss <- sapply(1:10, function(k) {
-      if (k > nrow(datos_matrix)) return(NA)
-      kmeans(datos_matrix, centers = k, nstart = 25, iter.max = 50)$tot.withinss
-    })
-    
-    df_wss <- data.frame(k = 1:10, wss = wss)
-    df_wss <- df_wss[!is.na(df_wss$wss), ]
-    
-    # Gráfico WSS
-    p_wss <- ggplot(df_wss, aes(x = k, y = wss)) +
-      geom_line() + geom_point() +
-      geom_vline(xintercept = 3, linetype = "dashed", color = "red") +
-      labs(title = paste("Método del Codo -", ano), x = "k", y = "WSS") +
-      scale_x_continuous(breaks = 1:10) +
-      theme_minimal()
-    
-    ggsave(filename = paste0("resultados_clusters/wss_", ano, ".pdf"), 
-           plot = p_wss, width = 6, height = 4)
-    
-    # --- Silueta para k=2 a 9 (máximo 9 porque k < nrow) ---
-    k_max_sil <- min(9, nrow(datos_matrix) - 1)
-    if (k_max_sil >= 2) {
-      k_range_sil <- 2:k_max_sil
-      
-      # Precalcular matriz de distancias
-      dist_matrix <- as.matrix(dist(datos_matrix))
-      
-      sil_values <- sapply(k_range_sil, function(k) {
-        set.seed(123)
-        km <- kmeans(datos_matrix, centers = k, nstart = 25, iter.max = 50)
-        clusters <- km$cluster
-        n <- length(clusters)
-        
-        sil_total <- 0
-        validos <- 0
-        
-        for (i in 1:n) {
-          mismo_cluster <- which(clusters == clusters[i])
-          if (length(mismo_cluster) == 1) next  # punto solitario, silueta 0
-          
-          otros_mismo <- mismo_cluster[mismo_cluster != i]
-          a_i <- mean(dist_matrix[i, otros_mismo])
-          
-          otros_clusters <- unique(clusters[clusters != clusters[i]])
-          b_i <- min(sapply(otros_clusters, function(c) {
-            mean(dist_matrix[i, clusters == c])
-          }))
-          
-          s_i <- (b_i - a_i) / max(a_i, b_i)
-          sil_total <- sil_total + s_i
-          validos <- validos + 1
-        }
-        
-        if (validos == 0) NA else sil_total / validos
-      })
-      
-      df_sil <- data.frame(k = k_range_sil, sil = sil_values)
-      df_sil <- df_sil[!is.na(df_sil$sil), ]
-      
-      if (nrow(df_sil) > 0) {
-        p_sil <- ggplot(df_sil, aes(x = k, y = sil)) +
-          geom_line() + geom_point() +
-          labs(title = paste("Método de la Silueta -", ano), x = "k", y = "Ancho silueta") +
-          scale_x_continuous(breaks = k_range_sil) +
-          theme_minimal()
-        
-        ggsave(filename = paste0("resultados_clusters/silhouette_", ano, ".pdf"), 
-               plot = p_sil, width = 6, height = 4)
-      } else {
-        message("Año ", ano, ": no se pudo calcular silueta (datos insuficientes después de filtros)")
-      }
-    } else {
-      message("Año ", ano, ": no hay k válidos para silueta (k_max_sil < 2)")
-    }
-    
-  }, error = function(e) {
-    message("Error en año ", ano, ": ", e$message)
+  ano <- unique(df_ano$tcode)
+  datos <- as.matrix(df_ano[, vars])
+  rownames(datos) <- NULL
+  
+  if (nrow(datos) < 3) { warning("Año ", ano, ": < 3 filas."); return(NULL) }
+  if (!all(is.finite(datos))) { warning("Año ", ano, ": valores no finitos."); return(NULL) }
+  
+  k_max_real <- min(k_max, nrow(datos) - 1)
+  
+  # --- WSS (método del codo) ---
+  set.seed(seed)
+  wss <- sapply(1:k_max_real, function(k) {
+    tryCatch(kmeans(datos, centers = k, nstart = 25, iter.max = 100)$tot.withinss,
+             error = function(e) NA_real_)
   })
+  
+  # --- Silueta manual ---
+  if (k_max_real >= 2) {
+    dist_mat <- as.matrix(dist(datos))
+    sil_vals <- sapply(2:k_max_real, function(k) {
+      set.seed(seed)
+      km <- tryCatch(kmeans(datos, centers = k, nstart = 25, iter.max = 100),
+                     error = function(e) return(NULL))
+      if (is.null(km)) return(NA_real_)
+      
+      clusters <- km$cluster
+      n <- length(clusters)
+      s_total <- vapply(seq_len(n), function(i) {
+        same <- which(clusters == clusters[i])
+        if (length(same) == 1) return(0)
+        a_i <- mean(dist_mat[i, same[same != i]])
+        other_cls <- unique(clusters[clusters != clusters[i]])
+        b_i <- min(sapply(other_cls, function(c) mean(dist_mat[i, clusters == c])))
+        (b_i - a_i) / max(a_i, b_i)
+      }, numeric(1))
+      mean(s_total, na.rm = TRUE)
+    })
+    df_sil <- data.frame(k = 2:k_max_real, sil = sil_vals)
+  } else {
+    df_sil <- data.frame(k = integer(0), sil = numeric(0))
+  }
+  
+  # Gráficos
+  df_wss <- data.frame(k = 1:k_max_real, wss = wss)
+  
+  p_wss <- ggplot(df_wss, aes(k, wss)) +
+    geom_line() + geom_point() +
+    geom_vline(xintercept = 4, linetype = "dashed", color = "red") +
+    labs(title = paste("Método del Codo —", ano), x = "k", y = "WSS") +
+    scale_x_continuous(breaks = 1:k_max_real) + theme_minimal()
+  
+  ggsave(paste0("resultados_clusters/wss_", ano, ".pdf"), p_wss, width = 6, height = 4)
+  
+  if (nrow(df_sil) > 0) {
+    p_sil <- ggplot(df_sil %>% filter(!is.na(sil)), aes(k, sil)) +
+      geom_line() + geom_point() +
+      labs(title = paste("Silueta —", ano), x = "k", y = "Ancho silueta") +
+      scale_x_continuous(breaks = df_sil$k) + theme_minimal()
+    ggsave(paste0("resultados_clusters/silhouette_", ano, ".pdf"), p_sil, width = 6, height = 4)
+  }
+  
+  list(ano = ano, wss = df_wss, silhouette = df_sil)
 }
 
-# 2. Estabilidad y sensibilidad
-# ---------
+k_results <- lapply(caa_split, evaluar_k_optimo, vars = vi)
 
-evaluar_estabilidad <- function(df_year, vars, k_range = 2:10, B = 100, 
-                                method = "ward.D", seed = 56,
-                                clustermethod = "hclustCBI") { # Permitir cambiar método
-  
+k_results
+
+# -----------------------------------------------------------------------
+# 6. ESTABILIDAD BOOTSTRAP (JACCARD)
+# -----------------------------------------------------------------------
+
+evaluar_estabilidad <- function(df_year, vars, k_range = 2:8, B = 100,
+                                method = "ward.D2", seed = 56) {
   ano <- unique(df_year$tcode)
-  datos <- df_year %>% dplyr::select(all_of(vars)) %>% as.data.frame()
+  datos <- as.data.frame(df_year[, vars])
   
-  # Validaciones
-  if (nrow(datos) < 2) {
-    warning("El año ", ano, " tiene menos de 2 filas. Se omite.")
-    return(NULL)
-  }
-  if (any(!sapply(datos, is.numeric))) stop("Variables no numéricas en año ", ano)
+  if (nrow(datos) < 2) { warning("Año ", ano, ": < 2 filas."); return(NULL) }
+  if (!all(sapply(datos, is.numeric))) stop("Variables no numéricas en año ", ano)
   if (any(!is.finite(as.matrix(datos)))) stop("Valores no finitos en año ", ano)
   
-  # Convertir a matriz y limpiar nombres
   datos_mat <- as.matrix(datos)
-  rownames(datos_mat) <- NULL
-  colnames(datos_mat) <- NULL
+  rownames(datos_mat) <- colnames(datos_mat) <- NULL
   
-  # Seleccionar método de clustering
-  if (clustermethod == "hclustCBI") {
-    cbi_method <- hclustCBI
-  } else if (clustermethod == "kmeansCBI") {
-    cbi_method <- kmeansCBI
-  } else {
-    stop("Método de clustering no reconocido")
-  }
-  
-  resultados <- list()
-  
-  for (k in k_range) {
-    message("Procesando año ", ano, ", k = ", k)
-    set.seed(56)  # Fijar semilla antes de cada iteración
-    
-    boot_res <- tryCatch(
-      {
-        clusterboot(datos_mat, B = B, 
-                    clustermethod = cbi_method, 
-                    method = method, 
-                    k = k)
-      },
-      error = function(e) {
-        message("  Error: ", e$message)
-        return(NULL)
-      }
-    )
-    
-    if (!is.null(boot_res)) {
-      resultados[[as.character(k)]] <- boot_res
-    } else {
-      # Guardamos un placeholder con NA en bootmean
-      resultados[[as.character(k)]] <- list(bootmean = rep(NA, k))
-    }
-  }
-  
-  # Extraer medias de Jaccard
-  jaccard_df <- map_dfr(resultados, 
-                        ~ tibble(media_jaccard = mean(.x$bootmean, na.rm = TRUE)), 
-                        .id = "k") %>%
-    mutate(k = as.integer(k))
-  
-  list(
-    jaccard = jaccard_df,
-    resultados_completos = resultados
-  )
-}
-
-# Lista para almacenar resultados
-estabilidad_anios <- list()
-
-for (anio in names(caa_split)) {
-  cat("\n========== Procesando año:", anio, "==========\n")
-  
-  res <- tryCatch(
-    evaluar_estabilidad(caa_split[[anio]], vars = vi, B = 100, method = "ward.D"),
-    error = function(e) {
-      cat("Error general en año", anio, ":", e$message, "\n")
-      return(NULL)
-    }
+  resultados <- setNames(
+    lapply(k_range, function(k) {
+      message("  Año ", ano, " | k = ", k)
+      set.seed(seed)                                   # BUG FIX: usar parámetro seed
+      tryCatch(
+        clusterboot(datos_mat, B = B, clustermethod = hclustCBI,
+                    method = method, k = k),
+        error = function(e) { message("  Error: ", e$message); NULL }
+      )
+    }),
+    as.character(k_range)
   )
   
-  estabilidad_anios[[anio]] <- res
+  jaccard_df <- purrr::map_dfr(resultados, function(r) {
+    tibble(media_jaccard = if (!is.null(r)) mean(r$bootmean, na.rm = TRUE) else NA_real_)
+  }, .id = "k") %>% mutate(k = as.integer(k))
+  
+  list(jaccard = jaccard_df, resultados_completos = resultados)
 }
 
-# Unir todos los años en un solo data frame
-jaccard_all <- map_dfr(estabilidad_anios, ~ .x$jaccard, .id = "anio")
+estabilidad_anios <- lapply(caa_split, function(df) {
+  tryCatch(evaluar_estabilidad(df, vars = vi, B = 100, method = "ward.D2"),
+           error = function(e) { cat("Error:", e$message, "\n"); NULL })
+})
 
-jaccard_all <- jaccard_all %>%
-  dplyr::select(anio, k, media_jaccard)
+jaccard_all <- purrr::map_dfr(estabilidad_anios, ~ .x$jaccard, .id = "anio")
+
+ggplot(jaccard_all, aes(k, media_jaccard, color = anio, group = anio)) +
+  geom_line() + geom_point() +
+  geom_hline(yintercept = 0.75, linetype = "dashed", color = "red") +
+  labs(title = "Estabilidad Bootstrap por año (Jaccard)",
+       x = "k", y = "Media Jaccard") + theme_minimal()
 
 
-ggplot(jaccard_all, aes(x = k, y = media_jaccard, color = anio, group = anio)) +
-  geom_line() +
-  geom_point() +
-  labs(title = "Estabilidad de clusters por año (media de Jaccard)",
-       x = "Número de clusters (k)", y = "Media del coeficiente de Jaccard") +
-  theme_minimal()
+# -----------------------------------------------------------------------
+# 7. ANÁLISIS DE SENSIBILIDAD (ARI)
+# -----------------------------------------------------------------------
 
-# Analísis de sensibilidad
-
-sensibilidad_k <- function(data, 
-                           vars, 
-                           k_ref, 
-                           k_range = 2:10,
-                           metodo_hclust = "ward.D2",
-                           semilla = 123,
-                           plot = TRUE) {
+sensibilidad_k <- function(data, vars, k_ref, k_range = 2:8,
+                           metodo_hclust = "ward.D2", semilla = 123) {
+  if (!requireNamespace("mclust", quietly = TRUE)) install.packages("mclust")
   
-  # Verificar paquetes necesarios
-  if (!requireNamespace("mclust", quietly = TRUE)) {
-    install.packages("mclust")
-  }
-  library(mclust)
-  
-  # Seleccionar y estandarizar datos (recomendable para clustering)
-  datos <- data %>% 
-    dplyr::select(all_of(vars)) %>% 
-    scale() %>% 
-    as.data.frame()
-  
-  # Calcular matriz de distancias y clustering jerárquico para referencia
+  datos <- data %>% dplyr::select(all_of(vars)) %>% scale() %>% as.data.frame()
   dist_ref <- dist(datos)
-  hc_ref <- hclust(dist_ref, method = metodo_hclust)
-  clusters_ref <- cutree(hc_ref, k = k_ref)
-  
-  # Inicializar dataframe de resultados
-  resultados <- data.frame(k = integer(), ari = numeric())
+  clusters_ref <- cutree(hclust(dist_ref, method = metodo_hclust), k = k_ref)
   
   set.seed(semilla)
+  resultados <- purrr::map_dfr(k_range[k_range != k_ref], function(k) {
+    clusters_k <- cutree(hclust(dist_ref, method = metodo_hclust), k = k)
+    tibble(k = k, ari = mclust::adjustedRandIndex(clusters_ref, clusters_k))
+  })
   
-  for (k in k_range) {
-    if (k == k_ref) next  # No comparar consigo mismo
-    
-    # Clustering jerárquico con k clusters
-    hc_k <- hclust(dist_ref, method = metodo_hclust)
-    clusters_k <- cutree(hc_k, k = k)
-    
-    # Índice de Rand ajustado
-    ari <- adjustedRandIndex(clusters_ref, clusters_k)
-    
-    resultados <- rbind(resultados, data.frame(k = k, ari = ari))
-  }
-  
-  # Ordenar por k
-  resultados <- resultados[order(resultados$k), ]
-  
-  # Gráfico
-  grafico <- NULL
-  if (plot) {
-    grafico <- ggplot(resultados, aes(x = k, y = ari)) +
-      geom_line() +
-      geom_point() +
-      geom_hline(yintercept = 0.7, linetype = "dashed", color = "red", alpha = 0.5) +
-      labs(title = paste("Sensibilidad al número de clusters (k_ref =", k_ref, ")"),
-           x = "Número de clusters (k)",
-           y = "ARI con respecto a k_ref") +
-      theme_minimal()
-  }
+  grafico <- ggplot(resultados, aes(k, ari)) +
+    geom_line() + geom_point() +
+    geom_hline(yintercept = 0.7, linetype = "dashed", color = "red", alpha = 0.5) +
+    labs(title = paste("Sensibilidad al número de clusters (k_ref =", k_ref, ")"),
+         x = "k", y = "ARI vs k_ref") + theme_minimal()
   
   list(comparaciones = resultados, grafico = grafico)
 }
 
-# Lista para almacenar resultados
-sensibilidad_anios <- list()
+sensibilidad_anios <- lapply(caa_split, function(df) {
+  tryCatch(sensibilidad_k(df, vars = vi, k_ref = 4, k_range = 2:8),
+           error = function(e) { cat("Error:", e$message, "\n"); NULL })
+})
 
-for (anio in names(caa_split)) {
-  cat("\n========== Procesando año:", anio, "==========\n")
-  
-  df_anio <- caa_split[[anio]]
-  
-  res <- tryCatch(
-    sensibilidad_k(
-      data = df_anio,
-      vars = vi,
-      k_ref = 4,
-      k_range = 2:10
-    ),
-    error = function(e) {
-      cat("Error en año", anio, ":", e$message, "\n")
-      NULL
-    }
-  )
-  
-  if (!is.null(res)) {
-    sensibilidad_anios[[anio]] <- res
-    # Mostrar el gráfico (opcional)
-    # print(res$grafico)
-  }
-}
-
-# Unir todas las comparaciones en un solo data frame
 comparaciones_todas <- bind_rows(lapply(names(sensibilidad_anios), function(anio) {
+  if (is.null(sensibilidad_anios[[anio]])) return(NULL)
   sensibilidad_anios[[anio]]$comparaciones %>% mutate(anio = anio, .before = 1)
 }))
 
-print(comparaciones_todas)
+comparaciones_todas
 
-# Interpretación
-# ARI = 1: las particiones son idénticas.
-# ARI > 0.7: buena concordancia (los clusters son estables).
-# ARI < 0.5: baja similitud, los clusters cambian sustancialmente al variar k.
+# -----------------------------------------------------------------------
+# 8. CLUSTERING JERÁRQUICO (WARD.D2)
+# -----------------------------------------------------------------------
 
-# 3. DBSCAN
-# ---------
-
-evaluar_dbscan_hclust_final <- function(data, 
-                                        year_label = NULL, 
-                                        eps_range = seq(0.3, 1.2, by = 0.1), 
-                                        minPts_explore = 5,
-                                        final_eps = 0.65, 
-                                        final_minPts = 9,
-                                        k_hclust_range = 2:10,
-                                        hclust_method = "ward.D2") {
-  
-  if (is.null(year_label)) year_label <- deparse(substitute(data))
-  
-  cat("Procesando año:", year_label, "\n") # depuración
-  
-  # Convertir a matriz numérica limpia
-  data_mat <- as.matrix(data)
-  storage.mode(data_mat) <- "numeric"
-  rownames(data_mat) <- NULL
-  colnames(data_mat) <- NULL
-  
-  # Verificar datos finitos
-  if (!all(is.finite(data_mat))) {
-    warning("Datos no finitos en año ", year_label)
-    return(NULL)
-  }
-  
-  # Eliminar columnas con varianza casi cero
-  var_cols <- apply(data_mat, 2, var)
-  if (any(var_cols < 1e-8)) {
-    warning("Eliminando columnas con varianza < 1e-8 en año ", year_label)
-    data_mat <- data_mat[, var_cols >= 1e-8, drop = FALSE]
-  }
-  
-  # Verificar que haya al menos 2 columnas
-  if (ncol(data_mat) < 2) {
-    warning("Menos de 2 columnas después de filtrado en año ", year_label)
-    return(NULL)
-  }
-  
-  # Verificar que haya al menos 2 filas
-  if (nrow(data_mat) < 2) {
-    warning("Menos de 2 filas en año ", year_label)
-    return(NULL)
-  }
-  
-  # 1. kNN distance plot con ggplot
-  knn_plot <- NULL
-  tryCatch({
-    k <- 7
-    knn_dists <- dbscan::kNNdist(data_mat, k = k)
-    df_knn <- data.frame(k = 1:nrow(knn_dists), dist = sort(knn_dists[, k]))
-    knn_plot <- ggplot(df_knn, aes(x = k, y = dist)) +
-      geom_line() +
-      geom_hline(yintercept = final_eps, linetype = "dashed", color = "red") +
-      labs(title = paste("kNN Distance Plot -", year_label),
-           x = "Puntos ordenados", y = paste(k, "-NN distance")) +
-      theme_minimal()
-  }, error = function(e) {
-    warning("Error en kNNdistplot para año ", year_label, ": ", e$message)
-  })
-  
-  # 2. Exploración de eps
-  resultados_eps <- data.frame(
-    eps = eps_range,
-    clusters = NA_integer_,
-    ruido = NA_integer_
-  )
-  for (i in seq_along(eps_range)) {
-    tryCatch({
-      db <- dbscan::dbscan(data_mat, eps = eps_range[i], minPts = minPts_explore)
-      resultados_eps$clusters[i] <- length(unique(db$cluster[db$cluster != 0]))
-      resultados_eps$ruido[i] <- sum(db$cluster == 0)
-    }, error = function(e) {
-      warning("Error en dbscan con eps = ", eps_range[i], " año ", year_label, ": ", e$message)
-    })
-  }
-  
-  # 3. DBSCAN final
-  dbscan_final <- NULL
-  tryCatch({
-    dbscan_final <- dbscan::dbscan(data_mat, eps = final_eps, minPts = final_minPts)
-  }, error = function(e) {
-    warning("Error en dbscan final año ", year_label, ": ", e$message)
-  })
-  
-  # 4. Evaluación jerárquica
-  eval_hclust <- tibble(k = integer(), CH = double(), DB = double())
-  hc <- NULL
-  tryCatch({
-    d <- dist(data_mat)
-    hc <- hclust(d, method = hclust_method)
-    eval_hclust <- purrr::map_dfr(k_hclust_range, function(k) {
-      grupos <- cutree(hc, k = k)
-      stats <- tryCatch(
-        fpc::cluster.stats(d, grupos),
-        error = function(e) list(ch = NA_real_, davies.bouldin = NA_real_)
-      )
-      tibble(k = k, CH = stats$ch, DB = stats$davies.bouldin)
-    })
-  }, error = function(e) {
-    warning("Error en análisis jerárquico año ", year_label, ": ", e$message)
-  })
-  
-  list(
-    year = year_label,
-    knn_plot = knn_plot,
-    eps_exploration = resultados_eps,
-    dbscan_final = dbscan_final,
-    hclust_evaluation = eval_hclust,
-    hclust_object = hc
-  )
-}
-
-resultados_dbscan <- lapply(caa_split, function(df) {
-  tryCatch(
-    evaluar_dbscan_hclust_final(
-      data = df %>% dplyr::select(all_of(vi)),
-      year_label = unique(df$tcode),
-      eps_range = seq(0.3, 1.2, 0.1),
-      final_eps = 0.65,
-      final_minPts = 9,
-      hclust_method = "ward.D2"
-    ),
-    error = function(e) {
-      message("Error fatal en año ", unique(df$tcode), ": ", e$message)
-      NULL
-    }
-  )
-})
-names(resultados_dbscan) <- names(caa_split)
-
-# Extracción y visualización de resultados
-
-eps_all <- map_dfr(resultados_dbscan, function(res) {
-  res$eps_exploration %>% mutate(anio = res$year)
-}, .id = "anio_id")
-
-head(eps_all)
-
-hclust_all <- map_dfr(resultados_dbscan, function(res) {
-  res$hclust_evaluation %>% mutate(anio = res$year)
-}, .id = "anio_id")
-
-head(hclust_all)
-
-ggplot(eps_all, aes(x = eps, y = clusters, color = anio)) +
-  geom_line() + geom_point() +
-  labs(title = "Número de clusters por eps (DBSCAN)",
-       x = "eps", y = "Número de clusters") +
-  theme_minimal()
-
-# CH
-ggplot(hclust_all, aes(x = k, y = CH, color = anio)) +
-  geom_line() + geom_point() +
-  labs(title = "Índice de Calinski-Harabasz (jerárquico Ward)",
-       x = "k", y = "CH") +
-  theme_minimal()
-
-dbscan_summary <- map_dfr(resultados_dbscan, function(res) {
-  if (!is.null(res$dbscan_final)) {
-    tibble(
-      anio = res$year,
-      clusters = length(unique(res$dbscan_final$cluster[res$dbscan_final$cluster != 0])),
-      ruido = sum(res$dbscan_final$cluster == 0)
-    )
-  }
-})
-
-print(dbscan_summary)
-
-# 4. CLUSTERING JERÁRQUICO
-# ------------------------
-
-hclust_only_debug <- function(df, vars, k, dist_method = "euclidean", 
-                              hclust_method = "ward.D", cluster_colname = "cluster_ward") {
-  
+hclust_anual <- function(df, vars, k = 6,
+                         dist_method = "euclidean",
+                         hclust_method = "ward.D2",    # ward.D2 es más estable que ward.D
+                         cluster_colname = "cluster_ward") {
   ano <- unique(df$tcode)
-  cat("\nProcesando año:", ano, "\n")
+  datos_matrix <- as.matrix(df[, vars])
+  rownames(datos_matrix) <- colnames(datos_matrix) <- NULL
   
-  # 1. Seleccionar variables
-  datos_cluster <- df %>% dplyr::select(all_of(vars))
-  cat("  - Dimensiones datos_cluster:", nrow(datos_cluster), "x", ncol(datos_cluster), "\n")
-  
-  if (nrow(datos_cluster) < 2) {
-    cat("  - ⚠️ Menos de 2 filas, se omite.\n")
-    return(NULL)
+  if (nrow(datos_matrix) < 2 || !all(is.finite(datos_matrix))) {
+    warning("Año ", ano, ": datos insuficientes o no finitos."); return(NULL)
   }
   
-  if (!all(sapply(datos_cluster, is.numeric))) {
-    cat("  - ❌ Variables no numéricas.\n")
-    return(NULL)
-  }
-  
-  # Limpiar datos
-  datos_matrix <- as.matrix(datos_cluster)
-  rownames(datos_matrix) <- NULL
-  colnames(datos_matrix) <- NULL
-  
-  if (!all(is.finite(datos_matrix))) {
-    cat("  - ❌ Datos no finitos.\n")
-    return(NULL)
-  }
-  
-  cat("  - Calculando distancias...\n")
-  dist_obj <- dist(datos_matrix, method = dist_method)
-  
-  cat("  - Realizando hclust...\n")
-  hc <- hclust(dist_obj, method = hclust_method)
-  
-  cat("  - Cortando en k =", k, "...\n")
-  clusters <- cutree(hc, k = k)
-  
-  # Asignar al data frame original
+  dist_obj   <- dist(datos_matrix, method = dist_method)
+  hc         <- hclust(dist_obj, method = hclust_method)
+  clusters   <- cutree(hc, k = k)
   df[[cluster_colname]] <- as.factor(clusters)
-  cat("  - ✅ Columna", cluster_colname, "agregada.\n")
   
-  list(
-    df_actualizado = df,
-    hclust_obj = hc,
-    dist_matrix = dist_obj,
-    clusters = clusters,
-    k = k
-  )
+  list(df_actualizado = df, hclust_obj = hc,
+       dist_matrix = dist_obj, clusters = clusters, k = k)
 }
 
-# Inicializar lista vacía
-resultados_hclust <- list()
+resultados_hclust <- lapply(caa_split, function(df) {
+  tryCatch(hclust_anual(df, vars = vi, k = 6, cluster_colname = "cluster_ward"),
+           error = function(e) { cat("Error:", e$message, "\n"); NULL })
+})
 
-for (anio in names(caa_split)) {
-  cat("\n==========", anio, "==========\n")
-  res <- tryCatch(
-    hclust_only_debug(caa_split[[anio]], vars = vi, k = 6, cluster_colname = "cluster_ward"),
-    error = function(e) {
-      cat("Error capturado en año", anio, ":", e$message, "\n")
-      NULL
-    }
-  )
-  resultados_hclust[[anio]] <- res
-}
-
-for (anio in names(resultados_hclust)) {
-  if (is.null(resultados_hclust[[anio]])) next
-  
-  hc_obj <- resultados_hclust[[anio]]$hclust_obj
-  k_val <- resultados_hclust[[anio]]$k
-  
-  # Intentar crear el dendrograma
-  #tryCatch({
-   # plot <- fviz_dend(hc_obj, k = k_val, rect = TRUE, 
-     #                 k_colors = "ucscgb", 
-      #                color_labels_by_k = TRUE,
-        #              show_labels = FALSE,
-        #              main = paste("Dendrograma -", anio, "(k =", k_val, ")"),
-         #             xlab = "Observaciones", ylab = "Altura")
-   # print(plot)
-    # Opcional: guardar como archivo
-    # ggsave(paste0("dendrograma_", anio, ".png"), plot, width = 10, height = 6)
-  #}, error = function(e) {
-   # message("No se pudo generar el dendrograma para ", anio, ": ", e$message)
-  #})
-}
-
-# Evaluación interna cluster
-library(cluster)
-
-silhouette_analysis <- function(hclust_result, year_label = NULL) {
-  
-  # Si el resultado es NULL (año fallido), salir
-  if (is.null(hclust_result)) {
-    warning("No hay datos para el año ", year_label)
-    return(NULL)
-  }
-  
-  # Extraer componentes
-  clusters <- hclust_result$clusters
-  dist_obj <- hclust_result$dist_matrix
-  k <- hclust_result$k
-  
-  # Usar el año proporcionado o extraerlo del nombre (si no se da)
-  if (is.null(year_label)) year_label <- deparse(substitute(hclust_result))
-  
-  # Calcular silhouette
-  sil <- silhouette(clusters, dist_obj)
-  sil_summary <- summary(sil)
-  
-  # Mostrar promedio en consola
-  cat("📊 Año", year_label, "- Silhouette promedio:", 
-      round(sil_summary$avg.width, 4), "\n")
-  
-  # Crear gráfico con fviz_silhouette
-  sil_plot <- fviz_silhouette(sil) + 
-    labs(title = paste("Gráfico de Silhouette -", year_label, "(k =", k, ")"),
-         x = "Observaciones", y = "Ancho de Silhouette") +
-    theme_minimal()
-  
-  # Retornar resultados
-  list(
-    silhouette_obj = sil,
-    summary = sil_summary,
-    plot = sil_plot,
-    avg_width = sil_summary$avg.width,
-    k = k,
-    year = year_label
-  )
-}
-
-silhouette_results <- map2(resultados_hclust, names(resultados_hclust),
-                           ~ silhouette_analysis(.x, year_label = .y))
-# Asignar nombres para fácil acceso
-names(silhouette_results) <- names(resultados_hclust)
-
-avg_widths <- map_dfr(silhouette_results, 
-                      ~ data.frame(anio = .x$year, 
-                                   k = .x$k, 
-                                   silueta_promedio = .x$avg_width))
-print(avg_widths)
-
-for (anio in names(silhouette_results)) {
-  if (!is.null(silhouette_results[[anio]])) {
-    plot(silhouette_results[[anio]]$plot)
-  }
-}
+# Silueta por año
+silhouette_results <- purrr::map2(resultados_hclust, names(resultados_hclust), function(res, anio) {
+  if (is.null(res)) return(NULL)
+  sil     <- silhouette(res$clusters, res$dist_matrix)
+  avg_w   <- summary(sil)$avg.width
+  cat("Año", anio, "| Silueta promedio:", round(avg_w, 4), "\n")
+  list(year = anio, avg_width = avg_w, k = res$k, plot = fviz_silhouette(sil) + theme_minimal())
+})
 
 
-# 5. Modelos no esféricos
-# ------------------------------------
+# -----------------------------------------------------------------------
+# 9. CLUSTERING AVANZADO: GMM + ESPECTRAL
+# -----------------------------------------------------------------------
 
 # Gaussian Mixture Models (GMM)
 # Dado que DBSCAN mostró un grupo denso y varios satélites, 
@@ -856,7 +1229,10 @@ advanced_clustering <- function(data,
   data$cluster_gmm <- if (!is.null(gmm_fijo)) as.factor(gmm_fijo$classification) else NA
   # Espectral
   data$cluster_spec <- if (!is.null(spec)) as.factor(as.integer(spec)) else NA
-  
+  # DBSCAN
+  data$cluster_db <- if (!is.null(db)) {
+    # Obtener vector de asignación de clusters
+    clusters <- db$cluster}
   
   
   
@@ -983,15 +1359,15 @@ saveRDS(resultados_avanzados, "resultados_avanzados.rds")
 df_2003_av <- resultados_avanzados[["2003"]]$data_actualizado
 df_2003_av %>%
   pivot_longer(cols = all_of(vi), names_to = "variable", values_to = "valor") %>%
-  ggplot(aes(x = cluster_gmm, y = valor, fill = cluster_gmm)) +
+  ggplot(aes(x = cluster_spec, y = valor, fill = cluster_spec)) +
   geom_boxplot() +
   facet_wrap(~ variable, scales = "free_y") +
-  labs(title = "Distribución de variables por cluster GMM - 2003",
-       x = "Cluster GMM", y = "Valor") +
+  labs(title = "Distribución de variables por cluster espectral - 2003",
+       x = "Cluster espectral", y = "Valor") +
   theme_minimal() +
   theme(legend.position = "none")
 
-# 6. ESTADÍSTICAS DESCRIPTIVAS POR CLUSTER
+# 10. ESTADÍSTICAS DESCRIPTIVAS POR CLUSTER
 # -----------------------------------------
 
 summarize_clusters <- function(data, 
@@ -1081,11 +1457,11 @@ resumen_2003 %>%
 write_csv(resumen_total, "resumen_clusters_todos_anos.csv")
 
 # Guardar un archivo por año (opcional)
-walk2(lista_resumenes, names(lista_resumenes), function(df, anio) {
-  if (!is.null(df)) {
-    write_csv(df, paste0("resumen_clusters_", anio, ".csv"))
-  }
-})
+# walk2(lista_resumenes, names(lista_resumenes), function(df, anio) {
+#  if (!is.null(df)) {
+#    write_csv(df, paste0("resumen_clusters_", anio, ".csv"))
+#  }
+#})
 
 # 7. GRÁFICOS DE CAJA POR CLUSTER 
 # -------------------------------
@@ -1158,7 +1534,7 @@ walk2(boxplot_list, names(boxplot_list), function(plot, anio) {
 # Verificación rápida
 print(boxplot_list[["2003"]])
 
-# 8. ANÁLISIS DE VARIANZA (ANOVA) Y POST-HOC
+# 11. ANÁLISIS DE VARIANZA (ANOVA) Y POST-HOC
 # -------------------------------------------
 
 anova_clusters <- function(data, 
@@ -1244,7 +1620,7 @@ anova_list <- map2(resultados_avanzados, names(resultados_avanzados), function(r
   anova_clusters(
     data = res$data_actualizado,
     vars = vi,
-    cluster_col = "cluster_gmm",
+    cluster_col = "cluster_spec",
     year_label = anio
   )
 })
@@ -1268,7 +1644,7 @@ library(agricolae)   # para HSD.test
 
 anova_tukey_final <- function(data, 
                               vars, 
-                              cluster_col = "cluster_gmm", 
+                              cluster_col = "cluster_spec", 
                               year_label = NULL,
                               p_threshold = 0.05) {
   
@@ -1670,6 +2046,8 @@ permanova_global_all <- bind_rows(lapply(resultados_multivariados, function(x) {
   }
 }))
 
+permanova_global_all
+
 # Guardar
 write.csv(permanova_global_all, "permanova_global_todos_anos.csv", row.names = FALSE)
 
@@ -1846,7 +2224,7 @@ importancia_variables_lda <- function(lda_model, data = NULL, metodo = "ambos") 
 
 # Ejemplo para un modelo específico
 imp03 <- importancia_variables_lda(
-  lda_model = resultados_lda[["2003_cluster_gmm"]]$lda_model,
+  lda_model = resultados_lda[["2003_cluster_spec"]]$lda_model,
   data = resultados_avanzados[["2003"]]$data_actualizado,
   metodo = "ambos"
 )
@@ -2586,7 +2964,7 @@ tests_markov <- list()
 crear_matriz_transicion <- function(datos, 
                                     anio_inicio, 
                                     anio_fin, 
-                                    cluster_col = "cluster_gmm",
+                                    cluster_col = "cluster_spec",
                                     id_col = "ID",
                                     time_col = "tcode") {
   
@@ -2638,7 +3016,7 @@ for (nombre in names(pares_anios)) {
     datos = df_unificado,
     anio_inicio = anios[1],
     anio_fin = anios[2],
-    cluster_col = "cluster_gmm",   
+    cluster_col = "cluster_spec",   
     id_col = "ID",
     time_col = "tcode"
   )
@@ -2780,7 +3158,7 @@ ggplot(top_tray,
   geom_stratum(width = 1/12, fill = "lightgray", color = "black") +
   geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 3) +
   scale_x_discrete(limits = c("2003", "2008", "2013", "2018", "2023"), expand = c(0.05, 0.05)) +
-  labs(title = "Transiciones de aglomeraciones GMM 2003-2023",
+  labs(title = "Transiciones de aglomeraciones espectrales 2003-2023",
        x = "Período", y = "Número de entidades", fill = "Cluster 2003") +
   theme_minimal()
 ggsave("alluvial_espectral.png", width = 14, height = 8)
@@ -3176,14 +3554,14 @@ if (any(st_is_empty(jdf_sf))) {
 }
 
 # --- Gráfico 1: Mapa facetado por sector y año ---
-cluster_elegido <- "cluster_gmm"  
+cluster_elegido <- "cluster_spec"  
 
 p1 <- ggplot(jdf_sf) +
   geom_sf(aes(fill = as.factor(.data[[cluster_elegido]])), color = NA) +
   scale_fill_viridis_d("Cluster") +
   facet_grid(AE ~ tcode) +
   theme_minimal() +
-  labs(title = "Evolución de aglomeraciones (GMM) por sector y quinquenio") +
+  labs(title = "Evolución de aglomeraciones espectrales por sector y quinquenio") +
   theme(axis.text = element_blank(),
         strip.text.y = element_text(angle = 0, size = 8),
         strip.text.x = element_text(size = 10))
@@ -3235,7 +3613,7 @@ if (!exists("jdf_sf")) {
 }
 
 # Elegir columna de clusters (espectral por defecto)
-cluster_col <- "cluster_gmm"
+cluster_col <- "cluster_spec"
 
 library(ggstream)
 
@@ -3297,4 +3675,3 @@ ggplot(caa_trellis, aes(x = tcode, y = prop, fill = .data[[cluster_col]])) +
   scale_y_continuous(labels = scales::percent) +
   scale_fill_viridis_d() +
   theme_minimal()
-
