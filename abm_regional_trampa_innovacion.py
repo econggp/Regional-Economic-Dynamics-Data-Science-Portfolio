@@ -559,10 +559,36 @@ class ConfiguracionAglomeraciones:
             [0.00, 0.00, 0.00, 0.00, 0.00, 0.05, 0.10, 0.05, 0.80]  # TE
         ]
 
-        # Para C2 y C4 usamos interpolaciones o variantes de las anteriores
-        # (Simplificado aquí reusando lógica similar para brevedad, pero conceptualmente distintas)
-        matriz_c2 = matriz_c1 # Intermedio
-        matriz_c4 = matriz_c1 # Alta diagonal (especialización)
+        # Matriz C2: Transición (movilidad moderada, algo mayor que C1)
+        # Regiones emergentes (Bajío, corredores industriales): mayor salto hacia manufactura y servicios
+        matriz_c2 = [
+            # PB    PA    MB    MA    SB    SI    SA    TM    TE
+            [0.80, 0.12, 0.06, 0.01, 0.01, 0.00, 0.00, 0.00, 0.00], # Primario_Bajo
+            [0.05, 0.70, 0.15, 0.05, 0.05, 0.00, 0.00, 0.00, 0.00], # Primario_Alto
+            [0.02, 0.05, 0.70, 0.15, 0.05, 0.03, 0.00, 0.00, 0.00], # Manuf_Baja
+            [0.00, 0.00, 0.10, 0.75, 0.05, 0.07, 0.03, 0.00, 0.00], # Manuf_Alta
+            [0.03, 0.00, 0.02, 0.00, 0.78, 0.12, 0.05, 0.00, 0.00], # Serv_Bajos
+            [0.00, 0.00, 0.00, 0.02, 0.08, 0.75, 0.15, 0.00, 0.00], # Serv_Intermedios
+            [0.00, 0.00, 0.00, 0.02, 0.00, 0.12, 0.86, 0.00, 0.00], # Serv_Avanzados
+            [0.01, 0.00, 0.00, 0.00, 0.04, 0.00, 0.00, 0.80, 0.15], # Turismo_Masivo
+            [0.00, 0.00, 0.00, 0.00, 0.00, 0.03, 0.02, 0.08, 0.87]  # Turismo_Esp
+        ]
+
+        # Matriz C4: Sobre-especialización (alta diagonal, resistencia a diversificar)
+        # Zonas mono-industriales: petróleo, minería, turismo masivo.
+        # Innovación incremental dentro del sector dominante, pero difícil diversificar.
+        matriz_c4 = [
+            # PB    PA    MB    MA    SB    SI    SA    TM    TE
+            [0.92, 0.06, 0.02, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00], # Primario_Bajo
+            [0.05, 0.90, 0.04, 0.01, 0.00, 0.00, 0.00, 0.00, 0.00], # Primario_Alto
+            [0.02, 0.05, 0.87, 0.06, 0.00, 0.00, 0.00, 0.00, 0.00], # Manuf_Baja
+            [0.00, 0.00, 0.08, 0.88, 0.02, 0.02, 0.00, 0.00, 0.00], # Manuf_Alta
+            [0.02, 0.00, 0.00, 0.00, 0.94, 0.04, 0.00, 0.00, 0.00], # Serv_Bajos
+            [0.00, 0.00, 0.00, 0.00, 0.05, 0.91, 0.04, 0.00, 0.00], # Serv_Intermedios
+            [0.00, 0.00, 0.00, 0.00, 0.00, 0.10, 0.90, 0.00, 0.00], # Serv_Avanzados
+            [0.01, 0.00, 0.00, 0.00, 0.02, 0.00, 0.00, 0.94, 0.03], # Turismo_Masivo
+            [0.00, 0.00, 0.00, 0.00, 0.00, 0.01, 0.00, 0.07, 0.92]  # Turismo_Esp
+        ]
 
         return {
             'C1': matriz_c1,
@@ -1840,7 +1866,8 @@ class FuerzaLaboral:
             'know_how_especifico': self.promedio_know_how,
             'brecha_calificacion': self.brecha_calificacion,
             'ratio_especializacion': ratio_especializacion,
-            'costo_nomina': sum(t.salario for t in self.trabajadores)
+            # BUG FIX: usar getattr para evitar AttributeError si salario no se asignó
+            'costo_nomina': sum(getattr(t, 'salario', 0.0) for t in self.trabajadores)
         }
 
 class Corporacion:
@@ -3472,7 +3499,8 @@ def _graficar_dashboard_emergente(df_ts, df_metrics, df_brechas, save_path):
             ax.set_title('Tipos de dinámica')
 
         plt.tight_layout()
-        plt.savefig(os.path.join(save_path, '06_analisis_sistemas_complejos.png'))
+        # RENOMBRADO: 09_ para evitar colisión con 06_matriz_correlaciones_principales.png
+        plt.savefig(os.path.join(save_path, '09_analisis_sistemas_complejos.png'))
         plt.close()
         print("   ✅ Gráfico de emergencia guardado.")
     except Exception as e:
@@ -3736,9 +3764,10 @@ def _graficar_dashboard_laboral(df_ts, df_final, save_path):
     # Guardado seguro
     try:
         plt.tight_layout()
-        plt.savefig(os.path.join(save_path, '07_analisis_trampa_laboral.png'), bbox_inches='tight', dpi=300)
+        # RENOMBRADO: 10_ para evitar colisión con 07_correlaciones_por_categorias.png
+        plt.savefig(os.path.join(save_path, '10_analisis_trampa_laboral.png'), bbox_inches='tight', dpi=300)
         plt.close()
-        print("   -> Guardado: 07_analisis_trampa_laboral.png")
+        print("   -> Guardado: 10_analisis_trampa_laboral.png")
     except Exception as e:
         print(f"Error guardando gráfico laboral: {e}")
 
@@ -3895,7 +3924,8 @@ def analizar_evolucion_cambio_tecnico(resultados: pd.DataFrame, save_path: str):
 
     plt.tight_layout()
     try:
-        plt.savefig(os.path.join(save_path, '8_evolucion_cambio_tecnico.png'), dpi=300)
+        # RENOMBRADO: 11_ para secuencia continua y eliminar el '8' sin cero inicial
+        plt.savefig(os.path.join(save_path, '11_evolucion_cambio_tecnico.png'), dpi=300)
         plt.close()
     except Exception as e:
         print(f"Error guardando gráfico técnico: {e}")
