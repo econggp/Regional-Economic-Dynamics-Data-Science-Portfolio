@@ -1016,13 +1016,26 @@ class EvaluacionDinamica:
 
         es_atrapada = "ATRAPADA" in estado_upper and "NO" not in estado_upper
 
-        # Lógica de histéresis: usa las constantes de clase para consistencia total
+        # FIX 2: Activar la banda de transición para que EN_TRANSICION sea alcanzable.
+        # Antes: sólo existían 2 estados → el Enum EN_TRANSICION era letra muerta.
+        # Ahora: banda [0.45, 0.75] produce EN_TRANSICION; salida y caída requieren cruzar los extremos.
+        BANDA_INFERIOR = EvaluacionDinamica.UMBRAL_CAIDA    # 0.45
+        BANDA_SUPERIOR = EvaluacionDinamica.UMBRAL_SALIDA   # 0.75
+
         if es_atrapada:
-            # Para salir necesita mucho esfuerzo (> UMBRAL_SALIDA = 0.75)
-            return "No_Atrapada" if ise > EvaluacionDinamica.UMBRAL_SALIDA else "Atrapada"
+            if ise > BANDA_SUPERIOR:
+                return "No_Atrapada"    # Escape real: superó umbral alto
+            elif ise > BANDA_INFERIOR:
+                return "En_Transicion"  # Mejora pero aún no consolida
+            else:
+                return "Atrapada"       # Sigue atrapada
         else:
-            # Para caer necesita fallar mucho (< UMBRAL_CAIDA = 0.45)
-            return "Atrapada" if ise < EvaluacionDinamica.UMBRAL_CAIDA else "No_Atrapada"
+            if ise < BANDA_INFERIOR:
+                return "Atrapada"       # Colapso: cayó bajo umbral bajo
+            elif ise < BANDA_SUPERIOR:
+                return "En_Transicion"  # Deterioro sin caída total
+            else:
+                return "No_Atrapada"    # Estable o avanzando
 
     @staticmethod
     def evaluar_evolucion_dinamica(df: pd.DataFrame, columna_estado_previo: str = None) -> pd.DataFrame:
@@ -2001,7 +2014,9 @@ class Corporacion:
 
         # 2. DECISIÓN DE INVERSIÓN
         # Porcentaje de reinversión depende de la confianza (macro) y aversión
-        factor_macro = getattr(self.region, 'factor_confianza_empresarial', 1.0)
+        # FIX 5: usar ciclo_economico de la región (antes: atributo nunca asignado → siempre 1.0)
+        factor_macro = getattr(self.region, 'factor_confianza_empresarial',
+                               getattr(self.region, '_ciclo_macro_actual', 1.0))
         tasa_reinversion = 0.20 * factor_macro * (1.0 - self.aversion_riesgo)
 
         monto_inversion = presupuesto_total * tasa_reinversion
@@ -2281,6 +2296,8 @@ class Region:
     def ejecutar_paso_simulacion(self, paso_tiempo: int, contexto_global: Dict[str, float]) -> Dict[str, Any]:
         """Ciclo principal de simulación."""
         self.paso_tiempo_actual = paso_tiempo
+        # FIX 5b: exponer ciclo_macro en la región para que Corporacion lo use
+        self._ciclo_macro_actual = contexto_global.get('ciclo_economico', 1.0)
 
         factor_ciclo = contexto_global.get('ciclo_economico', 1.0)
         competencia_global = contexto_global.get('competencia_global', 0.5)
@@ -2369,13 +2386,15 @@ class Region:
 
         nuevo_estado_str = EvaluacionDinamica.determinar_estado_transicion(estado_previo_str, ise)
 
-        # ACTUALIZAR EL ENUM INTERNO (Crucial para mantener consistencia)
+        # FIX 3: Mapeo explícito de los 3 estados (alineado con FIX 2)
         if nuevo_estado_str == "No_Atrapada":
             self.tipo_region_economica_actual = TipoRegionEconomica.NO_ATRAPADA
         elif nuevo_estado_str == "Atrapada":
             self.tipo_region_economica_actual = TipoRegionEconomica.ATRAPADA
-        else:
+        elif nuevo_estado_str == "En_Transicion":
             self.tipo_region_economica_actual = TipoRegionEconomica.EN_TRANSICION
+        else:
+            self.tipo_region_economica_actual = TipoRegionEconomica.ATRAPADA  # fallback seguro
 
         # Fix 3: Recalibrar parámetros tipológicos tras cambio de estado económico.
         # Sin esto, una región que escapa de la trampa sigue con tasas de aprendizaje
@@ -2681,15 +2700,17 @@ class ModeloEconomicoRegional:
         total_cambios = df_trans['cambio'].sum()
 
         # Detectar regiones milagro (Atrapada -> No_Atrapada)
+        # FIX 1: Usar == exacto — .contains('ATRAPADA') es substring de 'NO_ATRAPADA'
+        # y daba falsos positivos: regiones estables NO_ATRAPADA aparecían en ambas listas.
         milagros = df_trans[
-            (df_trans['Inicio'].str.upper().str.contains('ATRAPADA')) &
-            (df_trans['Fin'].str.upper().str.contains('NO'))
+            (df_trans['Inicio'].str.upper() == 'ATRAPADA') &
+            (df_trans['Fin'].str.upper() == 'NO_ATRAPADA')
         ]
 
         # Detectar colapsos (No_Atrapada -> Atrapada)
         colapsos = df_trans[
-            (df_trans['Inicio'].str.upper().str.contains('NO')) &
-            (df_trans['Fin'].str.upper().str.contains('ATRAPADA'))
+            (df_trans['Inicio'].str.upper() == 'NO_ATRAPADA') &
+            (df_trans['Fin'].str.upper() == 'ATRAPADA')
         ]
 
         return {
@@ -2937,10 +2958,10 @@ def _graficar_comparativa_tipologias(df, save_path, colores):
 
     # Agrupar usando la tipología actual del último paso (estado final)
     # Si es un DF histórico, filtramos el último paso para la foto final
-    ultimo_paso = df['paso_tiempo'].max() if 'paso_tiempo' in df.columns else df['paso_tiempo'].max()
+    ultimo_paso = df['paso_tiempo'].max()  # FIX 7: ambas ramas eran idénticas
     df_final = df[df['paso_tiempo'] == ultimo_paso].copy() if 'paso_tiempo' in df.columns else df.copy()
 
-    col_agrupacion = 'tipo_region_economica_actual' if 'tipo_region_economica_actual' in df_final.columns else 'tipo_region_economica_actual'
+    col_agrupacion = 'tipo_region_economica_actual'  # FIX 7: ambas ramas eran idénticas
 
     if col_agrupacion not in df_final.columns:
         print("⚠️ No se encontró columna de tipología para agrupar.")
@@ -2979,8 +3000,8 @@ def _graficar_comparativa_tipologias(df, save_path, colores):
 def _graficar_evolucion_temporal(df, save_path, colores):
     """2. Dinámica Temporal (Trayectorias de Convergencia/Divergencia)"""
 
-    col_tiempo = 'paso_tiempo' if 'paso_tiempo' in df.columns else 'paso_tiempo'
-    col_tipo = 'tipo_region_economica_actual' if 'tipo_region_economica_actual' in df.columns else 'tipo_region_economica_actual'
+    col_tiempo = 'paso_tiempo'  # FIX 7: ambas ramas eran idénticas
+    col_tipo = 'tipo_region_economica_actual'  # FIX 7: ambas ramas eran idénticas
 
     if col_tiempo not in df.columns: return
 
@@ -3023,7 +3044,7 @@ def _graficar_trampa_innovacion(df, save_path, colores):
     fig.suptitle('Diagnóstico de la trampa de innovación', fontsize=16, fontweight='bold')
 
     # Usamos solo el último paso para el diagnóstico final
-    col_tiempo = 'paso_tiempo' if 'paso_tiempo' in df.columns else 'paso_tiempo'
+    col_tiempo = 'paso_tiempo'  # FIX 7: ambas ramas eran idénticas
     ultimo_paso = df[col_tiempo].max()
     df_final = df[df[col_tiempo] == ultimo_paso].copy()
 
@@ -3059,8 +3080,8 @@ def _graficar_trampa_innovacion(df, save_path, colores):
                    s=100, alpha=0.7, edgecolors='w')
 
     ax2.set_xlabel('Tasa de innovación')
-    ax2.set_ylabel('Productividad promedio')
-    ax2.set_title('Eficiencia: Retorno de la innovación')
+    ax2.set_ylabel('PIB Regional')  # FIX 4: corregida etiqueta (antes: 'Productividad promedio')
+    ax2.set_title('Eficiencia: Retorno de la innovación (PIB vs Innovación)')
     ax2.grid(True, alpha=0.3)
 
     _guardar_figura(fig, save_path, '03_diagnostico_trampa.png')
@@ -3072,7 +3093,7 @@ def _graficar_analisis_geografico(df, save_path, colores):
     if 'tipo_region' not in df.columns: return
 
     # Usar datos finales
-    col_tiempo = 'paso_tiempo' if 'paso_tiempo' in df.columns else 'paso_tiempo'
+    col_tiempo = 'paso_tiempo'  # FIX 7: ambas ramas eran idénticas
     df_final = df[df[col_tiempo] == df[col_tiempo].max()]
 
     fig, ax = plt.subplots(figsize=(14, 7))
@@ -3151,10 +3172,10 @@ def _graficar_dashboard_integral(df, df_final, save_path, colores):
 
 def _generar_resumen_estadistico(df, save_path):
     """Genera CSV con pruebas T de Student entre grupos."""
-    col_tipo = 'tipo_region_economica_actual' if 'tipo_region_economica_actual' in df.columns else 'tipo_region_economica_actual'
+    col_tipo = 'tipo_region_economica_actual'  # FIX 7: ambas ramas eran idénticas
 
     # Usar datos finales
-    col_tiempo = 'paso_tiempo' if 'paso_tiempo' in df.columns else 'paso_tiempo'
+    col_tiempo = 'paso_tiempo'  # FIX 7: ambas ramas eran idénticas
     df_final = df[df[col_tiempo] == df[col_tiempo].max()]
 
     cols_analisis = ['capacidad_tecnologica', 'pib_regional', 'tasa_innovacion', 'brecha_calificacion']
@@ -3756,8 +3777,9 @@ def _graficar_dashboard_laboral(df_ts, df_final, save_path):
     ax = axes[1,1]
     # Seaborn SÍ acepta un diccionario en 'palette', así que esto estaba bien
     if 'indice_trampa_laboral' in df_final.columns:
+        # FIX 6: palette requiere hue desde seaborn 0.13 (eliminado en 0.14)
         sns.boxplot(data=df_final, x='tipo_region_economica_actual', y='indice_trampa_laboral',
-                   ax=ax, palette=paleta_segura)
+                   ax=ax, hue='tipo_region_economica_actual', palette=paleta_segura, legend=False)
         ax.set_title('Severidad de la trampa laboral')
         ax.tick_params(axis='x', rotation=15)
 
