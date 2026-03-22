@@ -7,10 +7,115 @@ Original file is located at
     https://colab.research.google.com/drive/1sGPNTW_P2kMcRrVNFTUNJZ3fYiMabET0
 """
 
+from google.colab import drive
+drive.mount('/content/drive')
+
 import pandas as pd
 import numpy as np
 
-df = pd.read_excel('/content/SAIC_Exporta_202623_11343700.xlsx')
+cbs_file = '/content/drive/MyDrive/UAM-UNAM/Bases/CBS_31.xlsx'
+saic_file = '/content/drive/MyDrive/UAM-UNAM/Bases/SAIC_Exporta_202623_11343700.xlsx'
+
+cbs_df = pd.read_excel(cbs_file, sheet_name='Sheet1', header=0)
+saic_df = pd.read_excel(saic_file)
+
+"""Deflación"""
+
+# Identificar la fila donde comienza "Variación porcentual" para descartar la segunda parte
+idx_var = cbs_df[cbs_df.iloc[:, 0].astype(str).str.contains('Variación porcentual', na=False)].index
+if len(idx_var) > 0:
+    cbs_df = cbs_df.iloc[:idx_var[0]]  # conservar solo la parte de índices
+
+# Limpiar nombres de columnas: años como cadenas
+cbs_df.columns = cbs_df.columns.astype(str).str.strip()
+
+# La primera columna es 'Concepto' con los códigos de actividad
+# Extraer el código completo (hasta el primer espacio)
+def extract_code(concept):
+    if pd.isna(concept):
+        return np.nan
+    s = str(concept).strip()
+    # Capturar todo hasta el primer espacio (permitiendo guiones internos)
+    m = re.match(r'^([^\s]+)', s)
+    if m:
+        return m.group(1)
+    return s
+
+import re
+
+cbs_df['codigo'] = cbs_df.iloc[:, 0].apply(extract_code)
+
+# Filtrar filas con códigos alfanuméricos (ej. "11", "31-33")
+cbs_df = cbs_df[cbs_df['codigo'].str.match(r'^[\d-]+$', na=False)].copy()
+
+# Años de interés
+year_cols = [str(y) for y in range(2003, 2025)]
+
+# Construir diccionario de índices: codigo -> año -> valor
+price_index = {}
+
+# Filtrar year_cols para incluir solo años presentes en cbs_df.columns
+# Se asume que las columnas de año son cadenas que pueden convertirse a enteros
+available_years = [col for col in cbs_df.columns if col.isdigit() and int(col) in range(2003, 2025)]
+
+for _, row in cbs_df.iterrows():
+    code = row['codigo']
+    price_index[code] = {}
+    for y in available_years:
+        val = row[y]
+        if pd.notna(val):
+            price_index[code][y] = float(val)
+
+monetary_cols = [
+    'tre', 'tgbs', 'tibs', 'pbt', 'vacb', 'itot', 'fbcf', 'ataf', 'dtaf',
+    'tga', 'tin', 'caafrm', 'vtaf', 'afup', 'prt',
+    'tsppvs', 'tspacd', 'ccle', 'gcee', 'cspct', 'gsc', 'cag',
+    'rabmi', 'ipspct', 'atmep', 'atbi', 'atuet', 'atecp', 'atmo'
+]
+
+# Verificar cuáles están realmente presentes en el DataFrame
+existing_monetary = [col for col in monetary_cols if col in saic_df.columns]
+
+"""Aplicar deflactor fila por fila
+
+Crear copia para añadir columnas reales
+"""
+
+saic_real = saic_df.copy()
+
+# Para cada fila, obtener año y sector, buscar índice y deflactar
+for idx, row in saic_real.iterrows():
+    year = str(int(row['tcode']))  # año como cadena
+    sector = str(row['AE']).strip()  # código de sector, ej. '11', '21', '31-33'
+
+    # Buscar índice en diccionario
+    if sector in price_index and year in price_index[sector]:
+        idx_val = price_index[sector][year] / 100.0  # factor deflactor (dividir)
+    else:
+        # Si no se encuentra, mostrar advertencia y usar 1.0 (sin deflactar)
+        print(f"Advertencia: No se encontró índice para sector {sector} en año {year}. Se usará 1.0.")
+        idx_val = 1.0
+
+    # Aplicar a cada columna monetaria
+    for col in existing_monetary:
+        if pd.notna(row[col]) and isinstance(row[col], (int, float)):
+            saic_real.at[idx, f'{col}_real'] = row[col] / idx_val
+        else:
+            saic_real.at[idx, f'{col}_real'] = row[col]  # mantener NaN o no numérico
+
+output_file = 'SAIC_Exporta_deflactado.xlsx'
+saic_real.to_excel(output_file, index=False)
+print(f"Archivo guardado: {output_file}")
+
+output_file_path = '/content/drive/MyDrive/SAIC_Exporta_deflactado.xlsx'
+saic_real.to_excel(output_file_path, index=False)
+print(f"DataFrame guardado exitosamente en '{output_file_path}'")
+
+# La ruta del archivo en Google Drive
+database_path = '/content/drive/MyDrive/SAIC_Exporta_deflactado.xlsx'
+
+df = pd.read_excel(database_path)
+df.head()
 
 def validar_datos(df, columnas_criticas):
     """Valida que no haya valores críticos faltantes"""
@@ -22,7 +127,7 @@ def validar_datos(df, columnas_criticas):
     return pd.DataFrame(reporte)
 
 # Ejecutar validación
-columnas_criticas = ['pot', 'pacd', 'ppvs', 'tga', 'ataf', 'vacb']
+columnas_criticas = ['pot', 'pacd', 'ppvs', 'tga_real', 'ataf_real', 'vacb_real']
 print(validar_datos(df, columnas_criticas))
 
 # Columnas que son etiquetas (ID)
@@ -57,7 +162,7 @@ def calcular_totales_groupby(df, columnas, grupo, sufijo):
     return totales
 
 # COLUMNAS MÉTRICAS
-metricas = ['pot', 'pacd', 'ppvs', 'UE', 'vacb', 'itot', 'ataf', 'fbcf']
+metricas = ['pot', 'pacd', 'ppvs', 'UE', 'vacb_real', 'itot_real', 'ataf_real', 'fbcf_real']
 
 # TOTALES POR SECTOR (sufijo _i)
 df_totales_i = calcular_totales_groupby(df, metricas, ['tcode', 'AE'], '_i')
@@ -87,85 +192,85 @@ def safe_divide(numerator, denominator, default=0):
 """Índices de capacidades"""
 
 # automa
-df['automa'] = safe_divide(df['atmep'], df['ppvs'])
+df['automa'] = safe_divide(df['atmep_real'], df['ppvs'])
+
+# ecpot
+df['ecpot'] = safe_divide(df['tre_real'], (df['tga_real'] - df['tre_real']))
 
 # ecpacd
-df['ecpacd'] = safe_divide(df['tspacd'], (df['tga'] - df['tspacd']))
+df['ecpacd'] = safe_divide(df['tspacd_real'], (df['tga_real'] - df['tspacd_real']))
 
 # ecppvs
-df['ecppvs'] = safe_divide(df['tsppvs'], (df['tga'] - df['tsppvs']))
+df['ecppvs'] = safe_divide(df['tsppvs_real'], (df['tga_real'] - df['tsppvs_real']))
+
+df['act_net'] = df['ataf_real'] - df['dtaf_real']
 
 # sact
-df['sact'] = safe_divide((df['ataf'] - df['dtaf']), df['ataf'])
+df['sact'] = safe_divide(df['act_net'], df['ataf_real'])
 
 # ecos
-df['ecos'] = safe_divide(df['vacb'], df['tga'])
+df['ecos'] = safe_divide(df['vacb_real'], df['tga_real'])
 
 # efene
-df['efene'] = safe_divide((df['gcee'] + df['ccle']), df['vacb'])
+df['efene'] = safe_divide(df['vacb_real'], (df['gcee_real'] + df['ccle_real']))
 
 # mbi
-df['mbi'] = safe_divide((df['tin'] - df['tga']), df['tin'])
+df['mbi'] = safe_divide((df['tin_real'] - df['tga_real']), df['tin_real'])
 
-df['roi'] = safe_divide(df['vacb'], df['fbcf'])
+df['eficap'] = safe_divide(df['vacb_real'], df['fbcf_real'])
 
 # cdig
-df['cdig'] = safe_divide(df['atecp'], df['pot'])
+df['cdig'] = safe_divide(df['atecp_real'], df['pot'])
 
 # intal
-df['intal'] = safe_divide((df['cspct'] + df['tspacd']), df['tga'])
+df['intal'] = safe_divide((df['cspct_real'] + df['tspacd_real']), df['tga_real'])
 
 # ite
-df['ite'] = safe_divide((df['atecp'] + df['atmep']), df['ataf'])
+df['ite'] = safe_divide((df['atecp_real'] + df['atmep_real']), df['ataf_real'])
 
-"""Índices de derrames"""
+df['roa'] = safe_divide((df['tin_real']- df['tga_real']), df['act_net'])
 
+"""Índices de derrames
+
+MAR
+"""
+
+# Proporciones sectoriales
 df['pn_pot'] = safe_divide(df['pot_i'], df['pot_tn'])
 df['pn_pacd'] = safe_divide(df['pacd_i'], df['pacd_tn'])
 df['pn_ppvs'] = safe_divide(df['ppvs_i'], df['ppvs_tn'])
 df['pn_ue'] = safe_divide(df['UE_i'], df['UE_tn'])
 
-df['marpot'] = safe_divide(df['pot'], safe_divide(df['pot_j'], df['pn_pot']))
-df['marpacd'] = safe_divide(df['pacd'], safe_divide(df['pacd_j'], df['pn_pot']))
-df['marppvs'] = safe_divide(df['ppvs'], safe_divide(df['ppvs_j'], df['pn_pot']))
-
-df_2023 = df[df['tcode'] == 2023].copy()
-df_2018 = df[df['tcode'] == 2018].copy()
-df_2013 = df[df['tcode'] == 2013].copy()
-df_2008 = df[df['tcode'] == 2008].copy()
-df_2003 = df[df['tcode'] == 2003].copy()
-
-top_5_sec23 = df_2023.sort_values(['NOMGEO', 'marpot'], ascending=[True, False])
-top_5_sec23 = top_5_sec23.groupby('NOMGEO').head(5)
-top_5_sec18 = df_2018.sort_values(['NOMGEO', 'marpot'], ascending=[True, False])
-top_5_sec18 = top_5_sec18.groupby('NOMGEO').head(5)
-top_5_sec13 = df_2013.sort_values(['NOMGEO', 'marpot'], ascending=[True, False])
-top_5_sec13 = top_5_sec13.groupby('NOMGEO').head(5)
-top_5_sec08 = df_2008.sort_values(['NOMGEO', 'marpot'], ascending=[True, False])
-top_5_sec08 = top_5_sec08.groupby('NOMGEO').head(5)
-top_5_sec03 = df_2003.sort_values(['NOMGEO', 'marpot'], ascending=[True, False])
-top_5_sec03 = top_5_sec03.groupby('NOMGEO').head(5)
-
-resultado_top23 = top_5_sec23[['NOMGEO', 'AE', 'marpot']]
-resultado_top18 = top_5_sec18[['NOMGEO', 'AE', 'marpot']]
-resultado_top13 = top_5_sec13[['NOMGEO', 'AE', 'marpot']]
-resultado_top08 = top_5_sec08[['NOMGEO', 'AE', 'marpot']]
-resultado_top03 = top_5_sec03[['NOMGEO', 'AE', 'marpot']]
-
-# Ejemplo
-print(resultado_top23[resultado_top23['NOMGEO'].str.contains("Nuevo León", na=False)])
-print(resultado_top18[resultado_top18['NOMGEO'].str.contains("Nuevo León", na=False)])
-print(resultado_top13[resultado_top13['NOMGEO'].str.contains("Nuevo León", na=False)])
-print(resultado_top08[resultado_top08['NOMGEO'].str.contains("Nuevo León", na=False)])
-print(resultado_top03[resultado_top03['NOMGEO'].str.contains("Nuevo León", na=False)])
-
 # Proporciones regionales
 df['ps_pot'] = safe_divide(df['pot'], df['pot_j'])
 df['ps_pacd'] = safe_divide(df['pacd'], df['pacd_j'])
 df['ps_ppvs'] = safe_divide(df['ppvs'], df['ppvs_j'])
-df['ps_vacb'] = safe_divide(df['vacb'], df['vacb_j'])
+df['ps_vacb'] = safe_divide(df['vacb_real'], df['vacb_real_j'])
 
-# Calcular el componente de Shannon: p_i * ln(p_i)
+df['marpot'] = safe_divide(df['ps_pot'],df['pn_pot'])
+df['marpacd'] = safe_divide(df['ps_pacd'],df['pn_pacd'])
+df['marppvs'] = safe_divide(df['ps_ppvs'],df['pn_ppvs'])
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+plt.figure(figsize=(12, 6))
+sns.boxplot(
+    data=df,
+    x='tcode',
+    y='marpot',
+    palette='viridis',
+    showfliers=True
+)
+plt.title('Distribución de marpot por Año Censal', fontsize=15)
+plt.xlabel('Año Censal', fontsize=12)
+plt.ylabel('marpot (Índice de Localización)', fontsize=12)
+plt.grid(True, alpha=0.3, axis='y')
+plt.show()
+
+"""DIV"""
+
+# Calcular el componente de Shannon: ps_i * ln(ps_i)
 df['ps_pot_safe'] = df['ps_pot'].clip(lower=1e-10)  # Evitar log(0)
 df['sp_pot'] = df['ps_pot'] * np.log(df['ps_pot_safe'])
 
@@ -177,32 +282,43 @@ df['sp_ppvs'] = df['ps_ppvs'] * np.log(df['ps_ppvs_safe'])
 
 # DIV
 sh_pot = df.groupby(['tcode', 'NOMGEO']).agg(
-    h_pot=('sp_pot', lambda x: x.sum() * -1),
+    divpot=('sp_pot', lambda x: x.sum() * -1),
     S_sectores=('AE', 'count')).reset_index()
 sh_pacd = df.groupby(['tcode', 'NOMGEO']).agg(
-    h_pacd=('sp_pacd', lambda x: x.sum() * -1),
+    divpacd=('sp_pacd', lambda x: x.sum() * -1),
     S_sectores=('AE', 'count')).reset_index()
 sh_ppvs = df.groupby(['tcode', 'NOMGEO']).agg(
-    h_ppvs=('sp_ppvs', lambda x: x.sum() * -1),
+    divppvs=('sp_ppvs', lambda x: x.sum() * -1),
     S_sectores=('AE', 'count')).reset_index()
 
+# Before merging, check if the columns 'h_pot', 'h_pacd', 'h_ppvs' already exist in df
+# and drop them to avoid merge conflicts on re-runs.
+columns_to_drop = ['divpot', 'divpacd', 'divppvs']
+for col in columns_to_drop:
+    if col in df.columns:
+        df = df.drop(columns=[col])
+
 # Merge Shannon indices and sector count into df
-df = pd.merge(df, sh_pot[['tcode', 'NOMGEO', 'h_pot', 'S_sectores']], on=['tcode', 'NOMGEO'], how='left')
-df = pd.merge(df, sh_pacd[['tcode', 'NOMGEO', 'h_pacd']], on=['tcode', 'NOMGEO'], how='left')
-df = pd.merge(df, sh_ppvs[['tcode', 'NOMGEO', 'h_ppvs']], on=['tcode', 'NOMGEO'], how='left')
+df = pd.merge(df, sh_pot[['tcode', 'NOMGEO', 'divpot']], on=['tcode', 'NOMGEO'], how='left')
+df = pd.merge(df, sh_pacd[['tcode', 'NOMGEO', 'divpacd']], on=['tcode', 'NOMGEO'], how='left')
+df = pd.merge(df, sh_ppvs[['tcode', 'NOMGEO', 'divppvs']], on=['tcode', 'NOMGEO'], how='left')
 
 # Equitabilidad Pielou (J')
-sh_pot['ep_pot'] = sh_pot['h_pot'] / np.log(sh_pot['S_sectores'])
-sh_pacd['ep_pacd'] = sh_pacd['h_pacd'] / np.log(sh_pacd['S_sectores'])
-sh_ppvs['ep_ppvs'] = sh_ppvs['h_ppvs'] / np.log(sh_ppvs['S_sectores'])
+sh_pot['ep_pot'] = sh_pot['divpot'] / np.log(sh_pot['S_sectores'])
+sh_pacd['ep_pacd'] = sh_pacd['divpacd'] / np.log(sh_pacd['S_sectores'])
+sh_ppvs['ep_ppvs'] = sh_ppvs['divppvs'] / np.log(sh_ppvs['S_sectores'])
+
+# Before merging, check if the columns 'ep_pot', 'ep_pacd', 'ep_ppvs' already exist in df
+# and drop them to avoid merge conflicts on re-runs.
+columns_to_drop_ep = ['ep_pot', 'ep_pacd', 'ep_ppvs']
+for col in columns_to_drop_ep:
+    if col in df.columns:
+        df = df.drop(columns=[col])
 
 # Merge Pielou's equitability into df
 df = pd.merge(df, sh_pot[['tcode', 'NOMGEO', 'ep_pot']], on=['tcode', 'NOMGEO'], how='left')
 df = pd.merge(df, sh_pacd[['tcode', 'NOMGEO', 'ep_pacd']], on=['tcode', 'NOMGEO'], how='left')
 df = pd.merge(df, sh_ppvs[['tcode', 'NOMGEO', 'ep_ppvs']], on=['tcode', 'NOMGEO'], how='left')
-
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 heatmap_data = sh_pot.pivot(index='NOMGEO', columns='tcode', values='ep_pot')
 
@@ -258,6 +374,8 @@ plt.ylabel('Entidad federativa', fontsize=12)
 
 plt.show()
 
+"""COM"""
+
 df['compot'] = np.log(
     np.clip(
         np.where(
@@ -294,31 +412,181 @@ df['comppvs'] = np.log(
     )
 ) ** 2
 
+""" `compot` es una medida de la ventaja o desventaja competitiva de un sector en una entidad. Un valor alto (considerando que es una distancia al cuadrado) puede indicar una fuerte divergencia en la eficiencia del uso de personal ocupado."""
+
+plt.figure(figsize=(12, 6))
+sns.boxplot(
+    data=df,
+    x='tcode',
+    y='compot',
+    palette='plasma',
+    showfliers= True
+)
+plt.title('Distribución de compot por Año Censal', fontsize=15)
+plt.xlabel('Año Censal', fontsize=12)
+plt.ylabel('compot (Índice de Competitividad)', fontsize=12)
+plt.ylim(0, 100) # Establece el límite del eje Y de 0 a 100
+plt.grid(True, alpha=0.3, axis='y')
+plt.show()
+
+"""HHI"""
+
+def calcular_hhi(df, var='pot'):
+    """
+    Calcula el Índice de Herfindahl-Hirschman (HHI) para todos los años,
+    estados y sectores.
+
+    Retorna:
+    --------
+    hhi_sector : pandas.DataFrame
+        HHI por sector y año. Columnas: tcode, AE, HHI_sector.
+    hhi_estado : pandas.DataFrame
+        HHI por estado y año. Columnas: tcode, NOMGEO, HHI_estado.
+    hhi_nacional : pandas.DataFrame
+        HHI nacional por año. Columnas: tcode, HHI_nacional.
+    """
+    # Copia para no modificar el original
+    df = df.copy()
+
+    # --- HHI por sector (concentración geográfica dentro de cada sector) ---
+    # Total de la variable por sector y año
+    df['total_sector_censo'] = df.groupby(['tcode', 'AE'])[var].transform('sum')
+    # Participación de cada estado en el sector-año
+    df['share_estado'] = df[var] / df['total_sector_censo']
+    # HHI por sector-año (suma de cuadrados de participaciones)
+    hhi_sector = df.groupby(['tcode', 'AE'])['share_estado'] \
+                   .apply(lambda x: (x**2).sum()) \
+                   .reset_index(name='HHI_sector')
+
+    # --- HHI por estado (concentración sectorial dentro de cada estado) ---
+    # Total de la variable por estado y año
+    df['total_estado_censo'] = df.groupby(['tcode', 'NOMGEO'])[var].transform('sum')
+    # Participación de cada sector en el estado-año
+    df['share_sector'] = df[var] / df['total_estado_censo']
+    # HHI por estado-año
+    hhi_estado = df.groupby(['tcode', 'NOMGEO'])['share_sector'] \
+                   .apply(lambda x: (x**2).sum()) \
+                   .reset_index(name='HHI_estado')
+
+    # --- HHI nacional (concentración entre estados) ---
+    # Total nacional por año
+    total_nac_censo = df.groupby('tcode')[var].sum().rename('total_nacional')
+    # Unir el total a cada fila (para calcular participación nacional)
+    df = df.merge(total_nac_censo, on='tcode')
+    # Participación de cada estado en el total nacional
+    df['share_nac'] = df[var] / df['total_nacional']
+    # HHI nacional por año (suma de cuadrados por estado, luego agrupado por año)
+    hhi_nacional = df.groupby('tcode').apply(
+        lambda g: (g.groupby('NOMGEO')['share_nac'].first()**2).sum()
+    ).reset_index(name='HHI_nacional')
+
+    # Eliminar columnas auxiliares si se desea (opcional)
+    df.drop(columns=['total_sector_censo', 'share_estado', 'total_estado_censo',
+                      'share_sector', 'total_nacional', 'share_nac'], inplace=True)
+
+    return hhi_sector, hhi_estado, hhi_nacional
+
+hhi_sec, hhi_est, hhi_nac = calcular_hhi(df, var='pot')
+
+# Ver resultados
+print("HHI por sector-año:\n", hhi_sec.head())
+print("\nHHI por estado-año:\n", hhi_est.head())
+print("\nHHI nacional por año:\n", hhi_nac.head())
+
+"""HHI por sector (hhi_sector): mide qué tan concentrado está un sector en pocos estados. Se calcula la participación de cada estado dentro del sector‑año y luego se suman los cuadrados.
+
+HHI por estado (hhi_estado): mide qué tan concentrada está la actividad de un estado en unos pocos sectores. Se calcula la participación de cada sector dentro del estado‑año y se suman los cuadrados.
+
+HHI nacional (hhi_nacional): mide la concentración geográfica global de la variable (ej. personal ocupado) entre estados. Es la suma de los cuadrados de las participaciones de cada estado en el total nacional.
+"""
+
+hhi_sec, hhi_est, hhi_nac = calcular_hhi(df, var='pacd')
+
+# Ver resultados
+print("HHI por sector-año:\n", hhi_sec.head())
+print("\nHHI por estado-año:\n", hhi_est.head())
+print("\nHHI nacional por año:\n", hhi_nac.head())
+
+hhi_sec, hhi_est, hhi_nac = calcular_hhi(df, var='ppvs')
+
+# Ver resultados
+print("HHI por sector-año:\n", hhi_sec.head())
+print("\nHHI por estado-año:\n", hhi_est.head())
+print("\nHHI nacional por año:\n", hhi_nac.head())
+
+"""Congruencia tecnológica"""
+
 # Índice de brecha laboral (ibl)
 df['ibl_pot'] = df['ps_pot'] - df['ps_vacb']
 df['ibl_pacd'] = df['ps_pacd'] - df['ps_vacb']
 df['ibl_ppvs'] = df['ps_ppvs'] - df['ps_vacb']
 
+display(df['ibl_pot'].describe())
+
+print("\nTop 10 de ibl_pot por año:\n")
+display(df.groupby('tcode').apply(lambda x: x.nlargest(10, 'ibl_pot')[['NOMGEO', 'AE', 'ibl_pot']]))
+
+print("\nBottom 10 de ibl_pot por año:\n")
+display(df.groupby('tcode').apply(lambda x: x.nsmallest(10, 'ibl_pot')[['NOMGEO', 'AE', 'ibl_pot']]))
+
+plt.figure(figsize=(12, 6))
+sns.boxplot(
+    data=df,
+    x='tcode',
+    y='ibl_pot',
+    palette='viridis',
+    showfliers=False # Ocultar outliers extremos para una mejor visualización de la caja
+)
+plt.title('Distribución de IBL_POT por Año Censal', fontsize=15)
+plt.xlabel('Año Censal', fontsize=12)
+plt.ylabel('IBL_POT', fontsize=12)
+plt.grid(True, alpha=0.3, axis='y')
+plt.show()
+
 # Índice de absorción de capacidades tecnológicas
 
 # Cálculo de los componentes
-df['dotacion_tech'] = safe_divide(df['ataf'], df['pot'])
-df['tasa_absorcion'] = safe_divide(df['itot'], df['vacb'])
+df['dotacion_tech'] = safe_divide(df['act_net'], df['pot'])
+df['tasa_absorcion'] = safe_divide(df['itot_real'], df['vacb_real'])
 
 # Índice Final (IACT)
-# Usamos raíz cuadrada para suavizar valores extremos
-df['iact'] = np.sqrt(df['dotacion_tech'] * df['tasa_absorcion'])
+# Usamos raíz cúbica para suavizar valores extremos
+df['iact'] = np.cbrt(df['dotacion_tech'] * df['tasa_absorcion'])
 
 # Normalización (para comparar entre 0 y 1 por año)
-df['iact_norm'] = df.groupby('tcode')['iact'].transform(
-    lambda x: (x - x.min()) / (x.max() - x.min())
-)
+min_ = df.groupby('tcode')['iact'].transform('min')
+max_ = df.groupby('tcode')['iact'].transform('max')
+df['iact_norm'] = (df['iact'] - min_) / (max_ - min_)
 
 plt.figure(figsize=(10, 6))
 sns.boxplot(x='tcode', y='iact_norm', data=df, palette='viridis')
 plt.title('Distribución de la absorción tecnológica por año')
 plt.ylabel('IACT normalizado')
 plt.show()
+
+componentes_est = df.groupby(['NOMGEO', 'tcode']).agg({
+    'dotacion_tech': 'mean',
+    'tasa_absorcion': 'mean',
+    'iact_norm': 'mean'
+}).sort_values('NOMGEO', ascending=True)
+
+display(componentes_est)
+
+componentes_sec = df.groupby(['AE', 'tcode']).agg({
+    'dotacion_tech': 'mean',
+    'tasa_absorcion': 'mean',
+    'iact_norm': 'mean'
+}).reset_index()
+# Convertir la columna 'AE' a tipo string para asegurar que todos los valores son comparables
+componentes_sec['AE'] = componentes_sec['AE'].astype(str)
+componentes_sec = componentes_sec.sort_values('AE', ascending=True)
+
+display(componentes_sec.head())
+
+brecha_sectorial = df[df['tcode']==2023].groupby('AE')['iact_norm'].agg(['max', 'mean'])
+brecha_sectorial['gap'] = brecha_sectorial['max'] - brecha_sectorial['mean']
+
+brecha_sectorial['gap']
 
 def clasificar_tech(valor):
     if valor >= 0.7: return 'Vanguardia'
@@ -341,23 +609,427 @@ top_10_2023 = df_comparativa[df_comparativa['tcode'] == 2023].nlargest(10, 'iact
 comparativa_tech = pd.concat([top_10_2018, top_10_2023])
 
 # 4. Mostramos columnas clave para entender el porqué del índice
-columnas_analisis = ['tcode', 'NOMGEO', 'AE', 'iact', 'ataf', 'itot', 'pot', 'vacb']
+columnas_analisis = ['tcode', 'NOMGEO', 'AE', 'iact', 'ataf_real', 'itot_real', 'pot', 'vacb_real']
 print(comparativa_tech[columnas_analisis])
 
 lider_2023 = df[(df['tcode'] == 2023) & (df['perfil_tech'] == 'Vanguardia')]
-print(lider_2023[['NOMGEO', 'AE', 'iact_norm', 'itot']])
+print(lider_2023[['NOMGEO', 'AE', 'iact_norm', 'itot_real']])
 
 lider_2018 = df[(df['tcode'] == 2018) & (df['perfil_tech'] == 'Vanguardia')]
-print(lider_2018[['NOMGEO', 'AE', 'iact_norm', 'itot']])
+print(lider_2018[['NOMGEO', 'AE', 'iact_norm', 'itot_real']])
 
 lider_2013 = df[(df['tcode'] == 2013) & (df['perfil_tech'] == 'Vanguardia')]
-print(lider_2013[['NOMGEO', 'AE', 'iact_norm', 'itot']])
+print(lider_2013[['NOMGEO', 'AE', 'iact_norm', 'itot_real']])
 
 lider_2008 = df[(df['tcode'] == 2008) & (df['perfil_tech'] == 'Vanguardia')]
-print(lider_2008[['NOMGEO', 'AE', 'iact_norm', 'itot']])
+print(lider_2008[['NOMGEO', 'AE', 'iact_norm', 'itot_real']])
 
 lider_2003 = df[(df['tcode'] == 2003) & (df['perfil_tech'] == 'Vanguardia')]
-print(lider_2003[['NOMGEO', 'AE', 'iact_norm', 'itot']])
+print(lider_2003[['NOMGEO', 'AE', 'iact_norm', 'itot_real']])
+
+# Convergencia
+convergencia = df.groupby('NOMGEO')['iact_norm'].agg(['min', 'max', 'mean']).reset_index()
+convergencia['rango'] = convergencia['max'] - convergencia['min']
+# Un rango pequeño sugiere convergencia, uno grande divergencia
+
+display(convergencia)
+
+print("Top 5 estados con mayor convergencia (menor rango de IACT normalizado):\n")
+display(convergencia.nsmallest(5, 'rango'))
+
+print("\nTop 5 estados con mayor divergencia (mayor rango de IACT normalizado):\n")
+display(convergencia.nlargest(5, 'rango'))
+
+plt.figure(figsize=(10, 6))
+sns.histplot(convergencia['rango'], kde=True, bins=15, color='skyblue')
+plt.title('Distribución del Rango de IACT Normalizado por Estado', fontsize=15)
+plt.xlabel('Rango (Max - Min IACT normalizado)', fontsize=12)
+plt.ylabel('Número de Estados', fontsize=12)
+plt.grid(True, alpha=0.3)
+plt.show()
+
+shapefile = '/content/drive/MyDrive/UAM-UNAM/Bases/Entidades_Federativas/Entidades_Federativas.shp'
+
+import geopandas as gpd
+
+mexico = gpd.read_file(shapefile)
+datos_estado = df.groupby('NOMGEO')['iact_norm'].mean().reset_index()
+mexico_iact = mexico.merge(datos_estado, on='NOMGEO')
+
+# Crear el mapa
+fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+mexico_iact.plot(
+    column='iact_norm', # Columna a mapear
+    cmap='OrRd',     # Mapa de colores ('OrRd', 'YlGn', 'plasma', etc.)
+    linewidth=0.8,
+    ax=ax,
+    edgecolor='0.8',
+    legend=True,
+    legend_kwds={'label': 'Índice de Actividad Tecnológica Normalizado'}
+)
+
+# Personalizar el mapa
+ax.set_title('IACT Normalizado por Entidad Federativa', fontsize=15)
+ax.set_axis_off() # Ocultar ejes
+plt.show()
+
+# Obtener los años censales únicos
+# Aseguramos que 'tcode' es numérico para poder ordenarlo correctamente
+anios_censales = sorted(df['tcode'].unique())
+
+# Loop para generar un mapa para cada año
+for year in anios_censales:
+    # Filtrar el DataFrame para el año actual
+    datos_anio = df[df['tcode'] == year].groupby('NOMGEO')['iact_norm'].mean().reset_index()
+
+    # Unir los datos del año con el GeoDataFrame de México
+    mexico_iact_anio = mexico.merge(datos_anio, on='NOMGEO', how='left')
+
+    # Crear el mapa para el año actual
+    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    mexico_iact_anio.plot(
+        column='iact_norm', # Columna a mapear
+        cmap='RdBu',     # Mapa de colores
+        linewidth=0.8,
+        ax=ax,
+        edgecolor='0.8',
+        legend=True,
+        legend_kwds={'label': f'Índice de Actividad Tecnológica Normalizado ({year})'}
+    )
+
+    # Personalizar el mapa
+    ax.set_title(f'IACT Normalizado por Entidad Federativa - Año {year}', fontsize=15)
+    ax.set_axis_off() # Ocultar ejes
+    plt.show()
+
+# Índice de congruencia
+
+def calcular_indice_congruencia(df, numerador, denominador, nivel_nacional='sector',
+                                grupo_regional=['tcode', 'NOMGEO', 'AE'],
+                                valor_default=0):
+    """
+    Calcula el índice de congruencia tecnológica para cada combinación de año, estado y sector.
+
+    Parámetros:
+    -----------
+    df : DataFrame
+        Debe contener las columnas: tcode (año), NOMGEO (estado), AE (sector),
+        y las columnas especificadas en numerador y denominador.
+    numerador : str
+        Nombre de la columna que representa el numerador de la intensidad (ej. 'atmep').
+    denominador : str
+        Nombre de la columna que representa el denominador de la intensidad (ej. 'ppvs').
+    nivel_nacional : {'sector', 'global'}, default='sector'
+        Define si la intensidad nacional se calcula por sector o a nivel global.
+    grupo_regional : list, default=['tcode', 'NOMGEO', 'AE']
+        Columnas que definen la unidad regional (año, estado, sector).
+    valor_default : float, default=0
+        Valor a asignar cuando el denominador es cero (usado por safe_divide).
+
+    Retorna:
+    --------
+    DataFrame con las columnas: grupo_regional + ['intensidad_regional', 'intensidad_nacional', 'indice_congruencia']
+    """
+    # Crear copia para no modificar original
+    df = df.copy()
+
+    # Calcular intensidad regional (por fila)
+    df['intensidad_regional'] = safe_divide(df[numerador], df[denominador], default=valor_default)
+
+    # Calcular intensidad nacional según el nivel elegido
+    if nivel_nacional == 'sector':
+        # Sumas nacionales por sector y año
+        nacional = df.groupby(['tcode', 'AE']).agg(
+            num_nac=(numerador, 'sum'),
+            den_nac=(denominador, 'sum')
+        ).reset_index()
+        nacional['intensidad_nacional'] = safe_divide(nacional['num_nac'], nacional['den_nac'], default=valor_default)
+        # Unir al DataFrame original
+        df = df.merge(nacional[['tcode', 'AE', 'intensidad_nacional']], on=['tcode', 'AE'], how='left')
+    else:  # nivel_nacional == 'global'
+        # Sumas nacionales globales por año
+        nacional = df.groupby('tcode').agg(
+            num_nac=(numerador, 'sum'),
+            den_nac=(denominador, 'sum')
+        ).reset_index()
+        nacional['intensidad_nacional'] = safe_divide(nacional['num_nac'], nacional['den_nac'], default=valor_default)
+        df = df.merge(nacional[['tcode', 'intensidad_nacional']], on='tcode', how='left')
+
+    # Calcular índice de congruencia (intensidad regional / intensidad nacional)
+    df['indice_congruencia'] = safe_divide(df['intensidad_regional'], df['intensidad_nacional'], default=valor_default)
+
+    # Seleccionar solo las columnas de interés
+    resultado = df[grupo_regional + ['intensidad_regional', 'intensidad_nacional', 'indice_congruencia']].copy()
+
+    return resultado
+
+# Calcular índice de congruencia
+indice_congruencia = calcular_indice_congruencia(df, 'atmep_real', 'ppvs', nivel_nacional='sector')
+
+# Verificar duplicados
+if indice_congruencia.duplicated(subset=['tcode', 'NOMGEO', 'AE']).any():
+    print("¡Hay duplicados! Agrupando por la media...")
+    indice_congruencia = indice_congruencia.groupby(['tcode', 'NOMGEO', 'AE'], as_index=False)['indice_congruencia'].mean()
+
+# Fusionar
+df = df.merge(indice_congruencia[['tcode', 'NOMGEO', 'AE', 'indice_congruencia']],
+              on=['tcode', 'NOMGEO', 'AE'], how='left')
+
+# Verificar resultado
+print(df[['tcode', 'NOMGEO', 'AE', 'indice_congruencia']].head(10))
+
+indice_congruencia_global = calcular_indice_congruencia(
+    df,
+    numerador='atmep_real',
+    denominador='ppvs',
+    nivel_nacional='global'
+)
+
+"""Un valor >1 indica que el estado tiene una estructura sectorial sesgada hacia sectores más intensivos en tecnología que el promedio nacional; un valor <1 indica lo contrario."""
+
+# Valores superiores a 1 agrupados por año
+superiores = indice_congruencia_global[indice_congruencia_global['indice_congruencia'] > 1].groupby('tcode')['indice_congruencia'].apply(list)
+
+# Valores inferiores a 1 agrupados por año
+inferiores = indice_congruencia_global[indice_congruencia_global['indice_congruencia'] < 1].groupby('tcode')['indice_congruencia'].apply(list)
+
+# Puedes combinarlos en un DataFrame
+tabla_valores = pd.DataFrame({
+    'superiores': superiores,
+    'inferiores': inferiores
+})
+print(tabla_valores)
+
+# Crear la columna 'grupo' en el DataFrame indice_congruencia_global
+indice_congruencia_global['grupo'] = indice_congruencia_global['indice_congruencia'].apply(lambda x: 'superior' if x > 1 else 'inferior')
+
+# Ahora, pivotar el DataFrame indice_congruencia_global con la nueva columna 'grupo'
+tabla_media = indice_congruencia_global.pivot_table(
+    index='tcode',
+    columns='grupo',
+    values='indice_congruencia',
+    aggfunc='mean'
+)
+print(tabla_media)
+
+anios_censales = sorted(indice_congruencia_global['tcode'].unique())
+
+# Loop para generar un mapa para cada año
+for year in anios_censales:
+    # Filtrar el DataFrame para el año actual y agrupar por estado para obtener el promedio
+    datos_anio_congruencia = indice_congruencia_global[indice_congruencia_global['tcode'] == year].groupby('NOMGEO')['indice_congruencia'].mean().reset_index()
+
+    # Unir los datos del año con el GeoDataFrame de México
+    mexico_congruencia_anio = mexico.merge(datos_anio_congruencia, on='NOMGEO', how='left')
+
+    # Crear el mapa para el año actual
+    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    mexico_congruencia_anio.plot(
+        column='indice_congruencia', # Columna a mapear
+        cmap='RdBu',     # Mapa de colores (rojo-amarillo-verde para indicar valores bajos, medios y altos)
+        linewidth=0.8,
+        ax=ax,
+        edgecolor='0.8',
+        legend=True,
+        legend_kwds={'label': f'Índice de Congruencia Tecnológica Global ({year})'}
+    )
+
+    # Personalizar el mapa
+    ax.set_title(f'Índice de Congruencia Tecnológica Global por Entidad Federativa - Año {year}', fontsize=15)
+    ax.set_axis_off() # Ocultar ejes
+    plt.show()
+
+# Perfil tecnológico
+def calcular_perfil_tecnologico(df, var_valor, puntaje_por_sector, grupo_regional=['tcode', 'NOMGEO']):
+    """
+    Calcula el perfil tecnológico de cada región (estado) como promedio ponderado
+    del puntaje tecnológico de sus sectores, usando como peso la participación
+    del valor agregado del sector en el total de la región.
+
+    Parámetros:
+    -----------
+    df : DataFrame
+        Debe contener las columnas: tcode (año), NOMGEO (estado), AE (sector),
+        y la variable de valor (ej. 'vacb').
+    var_valor : str
+        Nombre de la columna que representa el valor agregado (o empleo) del sector en el estado.
+    puntaje_por_sector : DataFrame o Series
+        Debe contener el puntaje tecnológico por sector (y opcionalmente por año).
+        Puede ser un DataFrame con columnas ['AE', 'puntaje'] o ['tcode', 'AE', 'puntaje'].
+        Si no incluye año, se asume constante en el tiempo.
+    grupo_regional : list, default=['tcode', 'NOMGEO']
+        Columnas que identifican la región (año y estado).
+
+    Retorna:
+    --------
+    DataFrame con las columnas grupo_regional + ['perfil_tecnologico']
+    """
+    # Crear copia para no modificar original
+    df = df.copy()
+
+    # Fusionar puntaje tecnológico
+    if 'tcode' in puntaje_por_sector.columns:
+        # Si el puntaje varía por año, fusionar por tcode y AE
+        df = df.merge(puntaje_por_sector, on=['tcode', 'AE'], how='left')
+    else:
+        # Si es constante, fusionar solo por AE
+        df = df.merge(puntaje_por_sector, on='AE', how='left')
+
+    # Calcular el valor total por región (estado-año)
+    df['valor_total_region'] = df.groupby(grupo_regional)[var_valor].transform('sum')
+
+    # Participación del sector en la región
+    df['participacion'] = safe_divide(df[var_valor], df['valor_total_region'])
+
+    # Contribución al perfil (participación * puntaje)
+    df['contribucion'] = df['participacion'] * df['puntaje']
+
+    # Sumar por región para obtener el perfil
+    perfil = df.groupby(grupo_regional)['contribucion'].sum().reset_index()
+    perfil.columns = grupo_regional + ['perfil_tecnologico']
+
+    return perfil
+
+puntajes = indice_congruencia[['tcode', 'AE', 'intensidad_nacional']].rename(columns={'intensidad_nacional': 'puntaje'})
+
+perfil = calcular_perfil_tecnologico(
+    df=df,
+    var_valor='vacb_real',
+    puntaje_por_sector=puntajes,
+    grupo_regional=['tcode', 'NOMGEO']
+)
+
+display(perfil)
+
+"""El perfil tecnológico resultante es un número que resume, en promedio ponderado, el nivel tecnológico de los sectores que componen la economía del estado. Valores altos indican una estructura productiva con mayor peso de sectores tecnológicamente intensivos."""
+
+estados_tech = perfil.copy()
+estados_tech['categoria'] = estados_tech['perfil_tecnologico'].apply(clasificar_tech)
+
+sectores_tech = indice_congruencia[['tcode', 'AE', 'intensidad_nacional']].copy()
+sectores_tech['categoria'] = sectores_tech['intensidad_nacional'].apply(clasificar_tech)
+
+import plotly.graph_objects as go
+
+def sankey_transiciones(df, entity_col, category_col, time_col='tcode', title='Diagrama de Sankey'):
+    """
+    Crea un diagrama de Sankey para visualizar transiciones de categorías entre años.
+
+    Parámetros:
+    -----------
+    df : DataFrame
+        Debe contener las columnas time_col, entity_col y category_col.
+    entity_col : str
+        Nombre de la columna que identifica la entidad (estado o sector).
+    category_col : str
+        Nombre de la columna con la categoría (ej. 'Vanguardia', 'Transición', ...).
+    time_col : str, default 'tcode'
+        Columna con el año.
+    title : str
+        Título del gráfico.
+    """
+    # Años ordenados
+    years = sorted(df[time_col].unique())
+
+    # Crear nodos: cada combinación año-categoría
+    node_labels = []
+    node_dict = {}  # (year, categoria) -> índice
+    idx = 0
+    for year in years:
+        categorias = sorted(df[df[time_col] == year][category_col].unique())
+        for cat in categorias:
+            label = f"{year} - {cat}"
+            node_labels.append(label)
+            node_dict[(year, cat)] = idx
+            idx += 1
+
+    # Enlaces entre años consecutivos
+    links = []
+    for i in range(len(years)-1):
+        y1, y2 = years[i], years[i+1]
+        # Datos de cada año
+        df1 = df[df[time_col] == y1].set_index(entity_col)[category_col]
+        df2 = df[df[time_col] == y2].set_index(entity_col)[category_col]
+        # Entidades presentes en ambos años
+        comunes = df1.index.intersection(df2.index)
+        if len(comunes) == 0:
+            continue
+        # Matriz de transición
+        trans = pd.DataFrame({
+            'cat1': df1.loc[comunes],
+            'cat2': df2.loc[comunes]
+        }).groupby(['cat1', 'cat2']).size().reset_index(name='count')
+        for _, row in trans.iterrows():
+            source = node_dict[(y1, row['cat1'])]
+            target = node_dict[(y2, row['cat2'])]
+            links.append(dict(source=source, target=target, value=row['count']))
+
+    # Crear figura
+    fig = go.Figure(data=[go.Sankey(
+        node=dict(
+            pad=15,
+            thickness=20,
+            line=dict(color='black', width=0.5),
+            label=node_labels,
+            color='lightblue'
+        ),
+        link=dict(
+            source=[link['source'] for link in links],
+            target=[link['target'] for link in links],
+            value=[link['value'] for link in links]
+        )
+    )])
+    fig.update_layout(title=title, font_size=12, width=1000, height=600)
+    fig.show()
+
+sankey_transiciones(
+    df=estados_tech,
+    entity_col='NOMGEO',
+    category_col='categoria',
+    time_col='tcode',
+    title='Transición del perfil tecnológico de los estados (2003-2023)'
+)
+
+sectores_tech = indice_congruencia[['tcode', 'AE', 'intensidad_nacional']].drop_duplicates(subset=['tcode', 'AE']).copy()
+sectores_tech['categoria'] = sectores_tech['intensidad_nacional'].apply(clasificar_tech)
+
+sectores_tech['AE'] = sectores_tech['AE'].astype(str)
+sankey_transiciones(
+    df=sectores_tech,
+    entity_col='AE',
+    category_col='categoria',
+    time_col='tcode',
+    title='Transición de la intensidad tecnológica de los sectores (2003-2023)'
+)
+
+df = df.merge(perfil, on=['tcode', 'NOMGEO'], how='left')
+
+anios_censales_perfil = sorted(perfil['tcode'].unique())
+
+# Loop para generar un mapa para cada año
+for year in anios_censales_perfil:
+    # Filtrar el DataFrame 'perfil' para el año actual
+    datos_anio_perfil = perfil[perfil['tcode'] == year].copy()
+
+    # Unir los datos del año con el GeoDataFrame de México
+    mexico_perfil_anio = mexico.merge(datos_anio_perfil, on='NOMGEO', how='left')
+
+    # Crear el mapa para el año actual
+    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    mexico_perfil_anio.plot(
+        column='perfil_tecnologico', # Columna a mapear
+        cmap='RdBu',     # Mapa de colores (corregido de 'RdBd' a 'RdBu')
+        linewidth=0.8,
+        ax=ax,
+        edgecolor='0.8',
+        legend=True,
+        legend_kwds={'label': f'Perfil Tecnológico Promedio ({year})'}
+    )
+
+    # Personalizar el mapa
+    ax.set_title(f'Perfil Tecnológico Promedio por Entidad Federativa - Año {year}', fontsize=15)
+    ax.set_axis_off() # Ocultar ejes
+    plt.show()
 
 """Índices de productividad"""
 
@@ -404,7 +1076,15 @@ posicion_relativa
 
 mejora
 
-df['prod_cap'] = safe_divide(df['vacb'], df['ataf'])
+posicion_relativa.describe()
+
+df['prod_cap'] = safe_divide(df['vacb_real'], df['act_net'])
+
+df['prod_pot'] = safe_divide(df['vacb_real'], df['htpot'])
+
+df['prod_pacd'] = safe_divide(df['vacb_real'], df['htpacd'])
+
+df['prod_ppvs'] = safe_divide(df['vacb_real'], df['htppvs'])
 
 # DICCIONARIO DE PESOS POR SECTOR (SCIAN 2 dígitos)
 PESOS_SECTORIALES = {
@@ -436,15 +1116,268 @@ def asignar_pesos(row):
 
 df[['alpha', 'beta']] = df.apply(asignar_pesos, axis=1)
 
+# Definir htpot, htpacd y htppvs asumiendo que son iguales a pot, pacd y ppvs respectivamente
+df['htpot'] = df['pot']
+df['htpacd'] = df['pacd']
+df['htppvs'] = df['ppvs']
+
 # PTF CON PESOS VARIABLES
-df['ptf'] = safe_divide(df['vacb'], ((df['pot'] ** df['alpha']) * (df['ataf'] ** df['beta'])))
+df['ptf'] = safe_divide(df['vacb_real'], ((df['htpot'] ** df['alpha']) + (df['act_net'] ** df['beta'])))
 
 # PTF NORMALIZADA POR AÑO (para comparabilidad)
 df['ptf_norm'] = df.groupby('tcode')['ptf'].transform(
     lambda x: (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else 0
 )
 
-def crear_tablas_ptf(df, metrica='ptf', anos=None, exportar=True):
+from openpyxl.styles import Font, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
+
+def aplicar_formato_apa(hoja, df, nombre_tabla, num_tabla):
+    """
+    Parámetros:
+    -----------
+    hoja : openpyxl.worksheet.worksheet.Worksheet
+        Hoja activa de Excel.
+    df : pd.DataFrame
+        DataFrame original (con los mismos datos que se escribieron).
+    nombre_tabla : str
+        Nombre interno de la tabla (ej. 'entidad_año'), se usará para generar el título.
+    num_tabla : int
+        Número correlativo de la tabla.
+    """
+    # ---------- Configuración general ----------
+    # Fuente
+    fuente = Font(name='Times New Roman', size=11)
+
+    # Bordes: solo línea inferior y superior para rangos específicos
+    thin_border = Border(
+        top=Side(style='thin'),
+        bottom=Side(style='thin'),
+        left=Side(style=None),   # Sin borde izquierdo
+        right=Side(style=None)    # Sin borde derecho
+    )
+    bottom_border = Border(bottom=Side(style='thin'))
+    top_border = Border(top=Side(style='thin'))
+
+    # Alineación
+    alinear_centro = Alignment(horizontal='center', vertical='center')
+    alinear_izquierda = Alignment(horizontal='left', vertical='center')
+
+    # ---------- Insertar fila para número y título de tabla ----------
+    # Desplazar una fila hacia abajo (la tabla comienza en fila 2)
+    hoja.insert_rows(1)
+    # El título debe ir en la primera fila, combinando celdas desde A hasta la última columna
+    ultima_columna = df.shape[1] + 1  # +1 por el índice
+    hoja.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ultima_columna)
+
+    # Crear título APA: "Tabla X: Título descriptivo"
+    titulo = f"Tabla {num_tabla}: {nombre_tabla.replace('_', ' ').title()}"
+    celda_titulo = hoja.cell(row=1, column=1)
+    celda_titulo.value = titulo
+    celda_titulo.font = Font(name='Times New Roman', size=11, italic=True)
+    celda_titulo.alignment = alinear_izquierda
+
+    # ---------- Ajustar anchos de columna ----------
+    for i, col in enumerate(df.columns, start=2):  # columna 1 es el índice
+        col_letra = get_column_letter(i)
+        max_len = max(df[col].astype(str).map(len).max(), len(str(col))) + 2
+        hoja.column_dimensions[col_letra].width = min(max_len, 20)
+
+    # Columna del índice
+    hoja.column_dimensions['A'].width = max(df.index.astype(str).map(len).max(), len(df.index.name or '')) + 2
+
+    # ---------- Aplicar formato a encabezados (fila 2 después del desplazamiento) ----------
+    encabezados_fila = 2
+    for col in range(1, ultima_columna + 1):
+        celda = hoja.cell(row=encabezados_fila, column=col)
+        celda.font = Font(name='Times New Roman', size=11, bold=True)
+        celda.alignment = alinear_centro
+        # Borde superior en toda la fila de encabezados
+        celda.border = top_border
+
+    # Borde inferior solo en la fila de encabezados
+    for col in range(1, ultima_columna + 1):
+        hoja.cell(row=encabezados_fila, column=col).border = thin_border
+
+    # ---------- Formato de datos (filas de datos) ----------
+    fila_inicio_datos = encabezados_fila + 1
+    fila_fin_datos = fila_inicio_datos + df.shape[0] - 1
+
+    for fila in range(fila_inicio_datos, fila_fin_datos + 1):
+        for col in range(1, ultima_columna + 1):
+            celda = hoja.cell(row=fila, column=col)
+            celda.font = fuente
+            # Alinear números a la derecha, texto a la izquierda
+            if col == 1:  # Índice (texto)
+                celda.alignment = alinear_izquierda
+            else:          # Datos (numéricos)
+                celda.alignment = alinear_centro
+                # Formato de número con 2 decimales si es numérico
+                if isinstance(celda.value, (int, float)):
+                    celda.number_format = '0.00'
+
+    # Borde inferior al final de la tabla
+    for col in range(1, ultima_columna + 1):
+        hoja.cell(row=fila_fin_datos, column=col).border = bottom_border
+
+    # ---------- Nota al pie (opcional) ----------
+    # Puedes añadir una fila con nota si lo deseas
+    # hoja.cell(row=fila_fin_datos+1, column=1, value="Nota. Elaboración propia con datos del Censo.")
+    # hoja.cell(row=fila_fin_datos+1, column=1).font = Font(italic=True)
+
+def tabla_descriptivos_multivariable(df, variables, grupo='tcode', exportar=True, formato_apa=False):
+    """
+    Genera una tabla con estadísticos descriptivos de múltiples variables,
+    agrupadas por la columna especificada (por defecto 'tcode').
+
+    Parámetros:
+    -----------
+    df : DataFrame
+        Datos de entrada.
+    variables : list
+        Lista de nombres de columnas a analizar.
+    grupo : str
+        Columna por la que agrupar (ej. 'tcode', 'NOMGEO'). Si es None, se calculan estadísticos globales.
+    exportar : bool
+        Si True, exporta a Excel.
+    formato_apa : bool
+        Si True, aplica formato APA al archivo.
+
+    Retorna:
+    --------
+    DataFrame con los estadísticos.
+    """
+    if grupo is None:
+        # Estadísticos globales (sin agrupar)
+        stats = df[variables].agg(['mean', 'std', 'min', 'max', 'count']).T
+        stats.columns = ['Media', 'Desv. Est.', 'Mínimo', 'Máximo', 'N']
+        stats.index.name = 'Variable'
+        titulo = "Estadísticos descriptivos globales"
+    else:
+        # Agrupar por la columna indicada
+        stats = df.groupby(grupo)[variables].agg(['mean', 'std', 'min', 'max', 'count'])
+        # Aplanar columnas
+        stats.columns = ['_'.join(col).strip() for col in stats.columns.values]
+        stats.reset_index(inplace=True)
+        titulo = f"Estadísticos descriptivos por {grupo}"
+
+    if exportar:
+        with pd.ExcelWriter('descriptivos_multivariable.xlsx', engine='openpyxl') as writer:
+            stats.to_excel(writer, sheet_name='Descriptivos', index=not grupo)
+            if formato_apa:
+                hoja = writer.sheets['Descriptivos']
+                aplicar_formato_apa(hoja, stats, titulo, num_tabla=1)
+
+    return stats
+
+def tabla_variables_por_ano(df, variables, anos=None, aggfunc='mean',
+                            incluir_n=False, exportar=True, formato_apa=False):
+    """
+    Genera una tabla con variables en filas y años en columnas,
+    mostrando el valor de agregación (media por defecto) para cada variable en cada año.
+
+    Parámetros:
+    -----------
+    df : DataFrame
+        Datos de entrada.
+    variables : list
+        Lista de nombres de columnas a incluir como filas.
+    anos : list, opcional
+        Lista de años a filtrar. Si es None, se toman todos.
+    aggfunc : str o función
+        Función de agregación (ej. 'mean', 'median', 'std'). Por defecto 'mean'.
+    incluir_n : bool
+        Si True, añade una fila adicional con el número de observaciones (N) por año.
+    exportar : bool
+        Si True, exporta a Excel.
+    formato_apa : bool
+        Si True, aplica formato APA al archivo.
+
+    Retorna:
+    --------
+    DataFrame con variables como índice y años como columnas.
+    """
+    # Filtrar años si se especifica
+    if anos is not None:
+        df = df[df['tcode'].isin(anos)]
+
+    # 1. Convertir a formato largo: una fila por (tcode, variable, valor)
+    df_long = df.melt(id_vars=['tcode'], value_vars=variables,
+                      var_name='variable', value_name='valor')
+
+    # 2. Calcular la agregación por variable y año
+    tabla = df_long.pivot_table(index='variable', columns='tcode',
+                                values='valor', aggfunc=aggfunc)
+
+    # 3. Opcional: añadir fila de conteo de observaciones por año
+    if incluir_n:
+        # Contar cuántas observaciones hay por año (para cualquier variable, asumiendo que no hay missings)
+        n_por_ano = df.groupby('tcode').size()
+        n_fila = n_por_ano.rename('N')
+        tabla = pd.concat([tabla, n_fila.to_frame().T])  # Añade la fila al final
+
+    # Ordenar años de menor a mayor (las columnas)
+    tabla = tabla[sorted(tabla.columns)]
+
+    # 4. Exportar
+    if exportar:
+        nombre_archivo = f'tabla_variables_por_ano_{aggfunc}.xlsx'
+        with pd.ExcelWriter(nombre_archivo, engine='openpyxl') as writer:
+            tabla.to_excel(writer, sheet_name='Variables por año')
+            if formato_apa:
+                hoja = writer.sheets['Variables por año']
+                # Título descriptivo
+                titulo = f"Valores promedio ({aggfunc}) de indicadores por año"
+                aplicar_formato_apa(hoja, tabla, titulo, num_tabla=1)
+
+    return tabla
+
+variables_interes = ['ptf_norm', 'marpot', 'divpot', 'compot', 'iact_norm', 'prod_cap']
+tabla_desc = tabla_descriptivos_multivariable(df, variables_interes, grupo='tcode', exportar=True, formato_apa=True)
+
+vars_interes = ['ptf_norm', 'marpot', 'divpot', 'compot', 'iact_norm', 'prod_cap']
+tabla = tabla_variables_por_ano(df, vars_interes, aggfunc='mean', incluir_n=True,
+                                exportar=True, formato_apa=True)
+
+print(tabla)
+
+def tabla_correlaciones(df, variables, metodo='pearson', exportar=True, formato_apa=False):
+    """
+    Genera una matriz de correlaciones entre las variables indicadas.
+
+    Parámetros:
+    -----------
+    df : DataFrame
+        Datos de entrada.
+    variables : list
+        Lista de nombres de columnas.
+    metodo : str
+        Método de correlación: 'pearson', 'spearman', 'kendall'.
+    exportar : bool
+        Si True, exporta a Excel.
+    formato_apa : bool
+        Si True, aplica formato APA.
+
+    Retorna:
+    --------
+    DataFrame con la matriz de correlación.
+    """
+    correl = df[variables].corr(method=metodo)
+
+    if exportar:
+        with pd.ExcelWriter('correlaciones.xlsx', engine='openpyxl') as writer:
+            correl.to_excel(writer, sheet_name='Correlaciones')
+            if formato_apa:
+                hoja = writer.sheets['Correlaciones']
+                aplicar_formato_apa(hoja, correl, f"Matriz de correlaciones ({metodo})", num_tabla=1)
+
+    return correl
+
+correl_matrix = tabla_correlaciones(df, variables_interes, metodo='pearson', exportar=True, formato_apa=True)
+
+correl_matrix
+
+def crear_tablas_ptf(df, metrica='ptf', anos=None, exportar=True, formato_apa=False):
     """
     Genera batería completa de tablas dinámicas para análisis de PTF.
 
@@ -458,17 +1391,20 @@ def crear_tablas_ptf(df, metrica='ptf', anos=None, exportar=True):
         Años a incluir (None = todos)
     exportar : bool
         Si True, exporta a Excel
+    formato_apa : bool
+        Si True, aplica formato APA al archivo Excel
 
     Retorna:
     --------
     dict con todas las tablas dinámicas generadas
     """
-
     # FILTRAR AÑOS SI SE ESPECIFICA
     if anos:
         df = df[df['tcode'].isin(anos)]
 
     tablas = {}
+
+    # ... (el resto de la generación de tablas igual que antes) ...
 
     # 1. POR ENTIDAD Y AÑO
     tablas['entidad_año'] = df.pivot_table(
@@ -481,13 +1417,17 @@ def crear_tablas_ptf(df, metrica='ptf', anos=None, exportar=True):
     )
 
     # 2. POR SECTOR Y AÑO
-    tablas['sector_año'] = df.pivot_table(
+    # Para facilitar el formato APA, aplanamos las columnas (quitamos MultiIndex)
+    sector_ano = df.pivot_table(
         values=metrica,
         index='AE',
         columns='tcode',
         aggfunc=['mean', 'median'],
         margins=True
     )
+    # Aplanar columnas
+    sector_ano.columns = ['_'.join(map(str, col)).strip() for col in sector_ano.columns.values]
+    tablas['sector_año'] = sector_ano
 
     # 3. POR ENTIDAD Y SECTOR (ÚLTIMO AÑO)
     ultimo_ano = df['tcode'].max()
@@ -519,25 +1459,23 @@ def crear_tablas_ptf(df, metrica='ptf', anos=None, exportar=True):
             'cambio_porcentual': ((ptf_final - ptf_inicial) / ptf_inicial) * 100
         }).reset_index().sort_values('cambio_porcentual', ascending=False)
 
-    # EXPORTAR A EXCEL
+    # EXPORTAR A EXCEL (con o sin formato APA)
     if exportar:
         with pd.ExcelWriter(f'analisis_ptf_{metrica}.xlsx', engine='openpyxl') as writer:
-            for nombre, tabla in tablas.items():
+            for i, (nombre, tabla) in enumerate(tablas.items(), start=1):
                 # Recortar nombre de hoja (máx 31 caracteres)
                 hoja = nombre[:31]
-                tabla.to_excel(writer, sheet_name=hoja)
+                tabla.to_excel(writer, sheet_name=hoja, index=True)
+
+                if formato_apa:
+                    # Obtener la hoja recién creada
+                    hoja_excel = writer.sheets[hoja]
+                    # Aplicar formato APA
+                    aplicar_formato_apa(hoja_excel, tabla, nombre, i)
 
     return tablas
 
-# EJECUTAR
-tablas_ptf = crear_tablas_ptf(df, metrica='ptf', exportar=True)
-
-# ACCEDER A CADA TABLA
-print(tablas_ptf['entidad_año'].head())
-print(tablas_ptf['cambio_temporal'].head())
-
-import matplotlib.pyplot as plt
-import seaborn as sns
+tablas_ptf = crear_tablas_ptf(df, metrica='ptf', exportar=True, formato_apa=True)
 
 # Obtener la tabla 'entidad_año' del diccionario
 heatmap_data_entidad_ano = tablas_ptf['entidad_año'].copy()
@@ -552,7 +1490,7 @@ sns.set_theme(style="white")
 sns.heatmap(heatmap_data_entidad_ano,
             annot=True,
             fmt=".2f",
-            cmap="RdYlGn",
+            cmap="RdBu",
             linewidths=.5,
             cbar_kws={'label': 'PTF Promedio'})
 
@@ -576,8 +1514,8 @@ def analisis_sensibilidad_pesos_ptf(df):
     df_2023 = df[df['tcode'] == 2023].copy()
 
     for nombre, (alpha, beta) in escenarios.items():
-        ptf = df_2023['vacb'] / ((df_2023['pot'] ** alpha) *
-                                  (df_2023['ataf'] ** beta))
+        ptf = df_2023['vacb_real'] / ((df_2023['htpot'] ** alpha) *
+                                  (df_2023['act_net'] ** beta))
         ptf_norm = (ptf - ptf.min()) / (ptf.max() - ptf.min())
         resultados[nombre] = ptf_norm
 
@@ -618,9 +1556,9 @@ def analisis_sensibilidad_pesos_ptf(df):
 corr_sensibilidad, df_sensibilidad = analisis_sensibilidad_pesos_ptf(df)
 
 # TABLA DINÁMICA: MÚLTIPLES MÉTRICAS
-# Assuming 'h_pot' was the intended 'sh_pot' for Shannon index
+
 ptf_multi_metricas = df.pivot_table(
-    values=['ptf', 'marpot', 'h_pot', 'compot','ibl_pot', 'iact_norm'],
+    values=['ptf', 'marpot', 'divpot', 'compot', 'iact', 'ibl_pot'],
     index=['NOMGEO', 'AE'],     # Filas combinadas
     columns='tcode',            # Columnas: Años
     aggfunc='mean',
@@ -634,9 +1572,6 @@ print(ptf_multi_metricas.round(2))
 
 # EXPORTAR
 ptf_multi_metricas.to_excel('ptf_multi_metricas.xlsx')
-
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 # PREPARAR DATOS PARA HEATMAP
 ptf_heatmap = df.pivot_table(
@@ -652,7 +1587,7 @@ sns.heatmap(
     ptf_heatmap,
     annot=True,
     fmt='.2f',
-    cmap='RdYlGn',        # Rojo-Amarillo-Verde
+    cmap='RdBu',        # Rojo-Amarillo-Verde
     linewidths=0.5,
     cbar_kws={'label': 'PTF Normalizado'}
 )
@@ -662,10 +1597,9 @@ plt.ylabel('Entidad Federativa', fontsize=12)
 plt.xticks(rotation=0)
 plt.yticks(rotation=0)
 plt.tight_layout()
-plt.show()
-
 # GUARDAR FIGURA
 plt.savefig('ptf_heatmap_entidades.png', dpi=300, bbox_inches='tight')
+plt.show()
 
 # PREPARAR DATOS
 ptf_lineas = df.pivot_table(
@@ -688,9 +1622,8 @@ plt.ylabel('PTF', fontsize=12)
 plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
 plt.grid(True, alpha=0.3)
 plt.tight_layout()
-plt.show()
-
 plt.savefig('ptf_tendencias_sectores.png', dpi=300, bbox_inches='tight')
+plt.show()
 
 plt.figure(figsize=(12, 6))
 sns.boxplot(
@@ -704,9 +1637,8 @@ plt.title('Distribución de PTF Normalizada por Año Censal', fontsize=15)
 plt.xlabel('Año Censal', fontsize=12)
 plt.ylabel('PTF Normalizado', fontsize=12)
 plt.grid(True, alpha=0.3, axis='y')
-plt.show()
-
 plt.savefig('ptf_boxplot_anos.png', dpi=300, bbox_inches='tight')
+plt.show()
 
 ptf_por_estado_2023 = df[df['tcode'] == 2023].groupby('NOMGEO')['ptf'].mean().sort_values(ascending=False).head(10)
 
@@ -743,16 +1675,14 @@ df['abs_diff_pot'] = (df['term_A_pot'] - df['term_B_pot']).abs()
 df['abs_diff_pacd'] = (df['term_A_pacd'] - df['term_B_pacd']).abs()
 df['abs_diff_ppvs'] = (df['term_A_ppvs'] - df['term_B_ppvs']).abs()
 
-# Sumar sobre todos los estados (j) para cada Sector y Año, y multiplicar por 0.5
-qs_df_pot = df.groupby(['tcode', 'AE'])['abs_diff_pot'].sum().reset_index()
-qs_df_pacd = df.groupby(['tcode', 'AE'])['abs_diff_pacd'].sum().reset_index()
-qs_df_ppvs = df.groupby(['tcode', 'AE'])['abs_diff_ppvs'].sum().reset_index()
+# Suma por sector-año y cálculo del Qs (multiplicar por 0.5)
+qs = df.groupby(['tcode', 'AE'])[['abs_diff_pot', 'abs_diff_pacd', 'abs_diff_ppvs']].sum().reset_index()
+qs[['Qs_pot', 'Qs_pacd', 'Qs_ppvs']] = qs[['abs_diff_pot', 'abs_diff_pacd', 'abs_diff_ppvs']] * 0.5
 
-qs_df_pot['Qs_pot'] = qs_df_pot['abs_diff_pot'] * 0.5
-qs_df_pacd['Qs_pacd'] = qs_df_pacd['abs_diff_pacd'] * 0.5
-qs_df_ppvs['Qs_ppvs'] = qs_df_ppvs['abs_diff_ppvs'] * 0.5
+# Incorporar los Qs al DataFrame original
+df = df.merge(qs[['tcode', 'AE', 'Qs_pot', 'Qs_pacd', 'Qs_ppvs']], on=['tcode', 'AE'], how='left')
 
-# Índice de Especialización Regional ($Qr$)
+# Índice de Especialización Regional (Qr)
 
 # Cálculo de los componentes
 # Participación local del sector i en el estado j
@@ -766,183 +1696,209 @@ df['pn_pacd'] = safe_divide(df['pacd_i'], df['pacd_tn'])
 df['pn_ppvs'] = safe_divide(df['ppvs_i'], df['ppvs_tn'])
 
 # Cálculo del Índice Qr (Agrupado por Estado y Año)
-qr_df_pot = df.groupby(['tcode', 'NOMGEO']).apply(
-    lambda x: 0.5 * np.sum(np.abs(x['pl_pot'] - x['pn_pot']))
-).reset_index(name='Qr_pot')
-qr_df_pacd = df.groupby(['tcode', 'NOMGEO']).apply(
-    lambda x: 0.5 * np.sum(np.abs(x['pl_pacd'] - x['pn_pacd']))
-).reset_index(name='Qr_pacd')
-qr_df_ppvs = df.groupby(['tcode', 'NOMGEO']).apply(
-    lambda x: 0.5 * np.sum(np.abs(x['pl_ppvs'] - x['pn_ppvs']))
-).reset_index(name='Qr_ppvs')
+def calcular_qr(group):
+    qr_pot = 0.5 * np.sum(np.abs(group['pl_pot'] - group['pn_pot']))
+    qr_pacd = 0.5 * np.sum(np.abs(group['pl_pacd'] - group['pn_pacd']))
+    qr_ppvs = 0.5 * np.sum(np.abs(group['pl_ppvs'] - group['pn_ppvs']))
+    return pd.Series({'Qr_pot': qr_pot, 'Qr_pacd': qr_pacd, 'Qr_ppvs': qr_ppvs})
+
+qr_df = df.groupby(['tcode', 'NOMGEO'], group_keys=False).apply(calcular_qr, include_groups=False).reset_index()
 
 # Merge Qr_pot into the main DataFrame df
-df = pd.merge(df, qr_df_pot[['tcode', 'NOMGEO', 'Qr_pot']], on=['tcode', 'NOMGEO'], how='left')
+df = pd.merge(df, qr_df, on=['tcode', 'NOMGEO'], how='left')
 
-crecimiento_pot = df.groupby(['tcode', 'NOMGEO'])['pot'].sum().reset_index()
-crecimiento_pacd = df.groupby(['tcode', 'NOMGEO'])['pacd'].sum().reset_index()
-crecimiento_ppvs = df.groupby(['tcode', 'NOMGEO'])['ppvs'].sum().reset_index()
+# Definir los años de interés (excluyendo 2003 que es la base)
+years = [2008, 2013, 2018, 2023]
 
-crecimiento_pivot_pot = crecimiento_pot.pivot(index=['NOMGEO'], columns='tcode', values='pot')
-crecimiento_pivot_pacd = crecimiento_pacd.pivot(index=['NOMGEO'], columns='tcode', values='pacd')
-crecimiento_pivot_ppvs = crecimiento_ppvs.pivot(index=['NOMGEO'], columns='tcode', values='ppvs')
+# Variables a procesar (se puede ampliar la lista)
+vars_list = ['pot', 'pacd', 'ppvs']
 
-crecimiento_pivot_pot['pct_crecimiento_pot'] = (crecimiento_pivot_pot[2023] - crecimiento_pivot_pot[2003]) / crecimiento_pivot_pot[2003] * 100
-crecimiento_pivot_pacd['pct_crecimiento_pacd'] = (crecimiento_pivot_pacd[2023] - crecimiento_pivot_pacd[2003]) / crecimiento_pivot_pacd[2003] * 100
-crecimiento_pivot_ppvs['pct_crecimiento_ppvs'] = (crecimiento_pivot_ppvs[2023] - crecimiento_pivot_ppvs[2003]) / crecimiento_pivot_ppvs[2003] * 100
+# Construir DataFrame base (año 2003) con las columnas necesarias
+base_cols = ['NOMGEO', 'AE'] + vars_list
+df_base = df[df['tcode'] == 2003][base_cols].copy()
+df_base.rename(columns={v: f'{v}_0' for v in vars_list}, inplace=True)
 
-qrpot_2023 = qr_df_pot[qr_df_pot['tcode'] == 2023].set_index(['NOMGEO'])
-datapot_plot = qrpot_2023.join(crecimiento_pivot_pot['pct_crecimiento_pot']).reset_index()
-qrpacd_2023 = qr_df_pacd[qr_df_pacd['tcode'] == 2023].set_index(['NOMGEO'])
-datapacd_plot = qrpacd_2023.join(crecimiento_pivot_pacd['pct_crecimiento_pacd']).reset_index()
-qrppvs_2023 = qr_df_ppvs[qr_df_ppvs['tcode'] == 2023].set_index(['NOMGEO'])
-datappvs_plot = qrppvs_2023.join(crecimiento_pivot_ppvs['pct_crecimiento_ppvs']).reset_index()
+# Diccionario para almacenar los resultados de cada año
+df_dinamico = {}
 
-plt.figure(figsize=(12, 8))
-sns.set_theme(style="whitegrid")
+for year in years:
+    # Filtrar año T
+    df_year = df[df['tcode'] == year][base_cols].copy()
+    df_year.rename(columns={v: f'{v}_T' for v in vars_list}, inplace=True)
+    # Merge con base
+    df_dinamico[year] = pd.merge(df_year, df_base, on=['NOMGEO', 'AE'], how='left')
 
-scatter = sns.scatterplot(
-    data=datapot_plot,
-    x='Qr_pot',
-    y='pct_crecimiento_pot',
-    size=2023, # El tamaño del punto puede ser el total de personal en 2023
-    sizes=(50, 500),
-    alpha=0.7,
-    hue='Qr_pot', # El color cambia según la especialización
-    palette='viridis'
-)
+# Con variables individuales:
+df_dinamico08 = df_dinamico[2008]
+df_dinamico13 = df_dinamico[2013]
+df_dinamico18 = df_dinamico[2018]
+df_dinamico23 = df_dinamico[2023]
 
-# Añadir etiquetas a los puntos (solo para los más destacados)
-for i in range(datapot_plot.shape[0]):
-    # Etiquetar estados con Qr alto o crecimiento muy alto/bajo
-    if datapot_plot.Qr_pot[i] > 0.22 or datapot_plot.pct_crecimiento_pot[i] > 100:
-        plt.text(
-            datapot_plot.Qr_pot[i]+0.005,
-            datapot_plot.pct_crecimiento_pot[i],
-            datapot_plot.NOMGEO[i],
-            fontsize=9
-        )
+df_dinamico23
 
-plt.title('Relación entre especialización económica ($Qr$) y crecimiento laboral (2003-2023)', fontsize=15)
-plt.xlabel('Índice de especialización regional ($Qr$) - Año 2023', fontsize=12)
-plt.ylabel('Crecimiento porcentual del personal (%)', fontsize=12)
-plt.axvline(datapot_plot['Qr_pot'].mean(), color='red', linestyle='--', alpha=0.5, label='Media Qr_pot')
+# Definir los años de interés (excluyendo 2003)
+years = [2008, 2013, 2018, 2023]
 
-plt.show()
+# Crear DataFrame base (año 2003)
+base_cols = ['NOMGEO', 'AE', 'pot', 'pacd', 'ppvs']
+df_base = df[df['tcode'] == 2003][base_cols].copy()
+df_base.rename(columns={'pot': 'pot_0', 'pacd': 'pacd_0', 'ppvs': 'ppvs_0'}, inplace=True)
 
-plt.figure(figsize=(12, 8))
-sns.set_theme(style="whitegrid")
+# Diccionario para almacenar los DataFrames dinámicos
+df_dinamico = {}
 
-scatter = sns.scatterplot(
-    data=datapacd_plot,
-    x='Qr_pacd',
-    y='pct_crecimiento_pacd',
-    size=2023, # El tamaño del punto puede ser el total de personal en 2023
-    sizes=(50, 500),
-    alpha=0.7,
-    hue='Qr_pacd', # El color cambia según la especialización
-    palette='viridis'
-)
+for year in years:
+    # Filtrar año T y renombrar columna
+    df_year = df[df['tcode'] == year][base_cols].copy()
+    df_year.rename(columns={'pot': 'pot_T', 'pacd': 'pacd_T', 'ppvs': 'ppvs_T'}, inplace=True)
 
-# Añadir etiquetas a los puntos (solo para los más destacados)
-for i in range(datapacd_plot.shape[0]):
-    # Etiquetar estados con Qr alto o crecimiento muy alto/bajo
-    if datapacd_plot.Qr_pacd[i] > 0.22 or datapacd_plot.pct_crecimiento_pacd[i] > 100:
-        plt.text(
-            datapacd_plot.Qr_pacd[i]+0.005,
-            datapacd_plot.pct_crecimiento_pacd[i],
-            datapacd_plot.NOMGEO[i],
-            fontsize=9
-        )
+    # Merge con base
+    df_merged = pd.merge(df_year, df_base, on=['NOMGEO', 'AE'], how='left')
 
-plt.title('Relación entre especialización económica ($Qr$) y crecimiento laboral PACD (2003-2023)', fontsize=15)
-plt.xlabel('Índice de especialización regional ($Qr$) - Año 2023', fontsize=12)
-plt.ylabel('Crecimiento porcentual del PACD (%)', fontsize=12)
-plt.axvline(datapacd_plot['Qr_pacd'].mean(), color='red', linestyle='--', alpha=0.5, label='Media Qr_pacd')
+    # Calcular la razón de variación
+    df_merged[f'rv_ij{year}'] = safe_divide(df_merged['pot_T'], df_merged['pot_0'])
 
-plt.show()
+    # Guardar en diccionario
+    df_dinamico[year] = df_merged
 
-plt.figure(figsize=(12, 8))
-sns.set_theme(style="whitegrid")
+# Si se necesitan variables individuales (opcional)
+df_dinamico08 = df_dinamico[2008]
+df_dinamico13 = df_dinamico[2013]
+df_dinamico18 = df_dinamico[2018]
+df_dinamico23 = df_dinamico[2023]
 
-scatter = sns.scatterplot(
-    data=datappvs_plot,
-    x='Qr_ppvs',
-    y='pct_crecimiento_ppvs',
-    size=2023, # El tamaño del punto puede ser el total de personal en 2023
-    sizes=(50, 500),
-    alpha=0.7,
-    hue='Qr_ppvs', # El color cambia según la especialización
-    palette='viridis'
-)
+years = [2008, 2013, 2018, 2023]
 
-# Añadir etiquetas a los puntos (solo para los más destacados)
-for i in range(datappvs_plot.shape[0]):
-    # Etiquetar estados con Qr alto o crecimiento muy alto/bajo
-    if datappvs_plot.Qr_ppvs[i] > 0.22 or datappvs_plot.pct_crecimiento_ppvs[i] > 100:
-        plt.text(
-            datappvs_plot.Qr_ppvs[i]+0.005,
-            datappvs_plot.pct_crecimiento_ppvs[i],
-            datappvs_plot.NOMGEO[i],
-            fontsize=9
-        )
+# Diccionario para guardar los resultados CRr por año
+crr_resultados = {}
 
-plt.title('Relación entre especialización económica ($Qr$) y crecimiento laboral PPVS (2003-2023)', fontsize=15)
-plt.xlabel('Índice de especialización regional ($Qr$) - Año 2023', fontsize=12)
-plt.ylabel('Crecimiento porcentual del PPVS (%)', fontsize=12)
-plt.axvline(datappvs_plot['Qr_ppvs'].mean(), color='red', linestyle='--', alpha=0.5, label='Media Qr_ppvs')
+for year in years:
+    df_yr = df_dinamico[year]  # DataFrame para el año T
 
-plt.show()
+    # Totales por estado en año T y base 2003
+    df_yr['total_estado_T'] = df_yr.groupby('NOMGEO')['pot_T'].transform('sum')
+    df_yr['total_estado_0'] = df_yr.groupby('NOMGEO')['pot_0'].transform('sum')
 
-df_2003 = df[df['tcode'] == 2003].copy()
-df_2023 = df[df['tcode'] == 2023].copy()
+    # Proporciones
+    df_yr['prop_T'] = safe_divide(df_yr['pot_T'], df_yr['total_estado_T'])
+    df_yr['prop_0'] = safe_divide(df_yr['pot_0'], df_yr['total_estado_0'])
 
-# Renombramos columnas para identificar V(0) y V(T)
-# Usaremos 'AE' como sector y 'NOMGEO' como estado para el cruce (Merge)
-df_base = df_2003[['NOMGEO', 'AE', 'pot']].rename(columns={'pot': 'pot_0'})
-df_actual = df_2023[['NOMGEO', 'AE', 'pot']].rename(columns={'pot': 'pot_T'})
+    # Diferencia absoluta
+    df_yr['diff_abs_crr'] = (df_yr['prop_T'] - df_yr['prop_0']).abs()
 
-# Unimos ambos años en un solo DataFrame de trabajo
-df_dinamico = pd.merge(df_actual, df_base, on=['NOMGEO', 'AE'], how='left')
+    # Agregación por estado y cálculo de CRr
+    crr_agg = df_yr.groupby('NOMGEO')['diff_abs_crr'].sum().reset_index()
+    crr_agg['CRr'] = crr_agg['diff_abs_crr'] * 0.5
+    crr_agg = crr_agg[['NOMGEO', 'CRr']]          # solo columnas necesarias
+    crr_agg['year'] = year                         # opcional: identificar año
 
-df_dinamico['rv_ij'] = safe_divide(df_dinamico['pot_T'], df_dinamico['pot_0'])
+    crr_resultados[year] = crr_agg
 
-df_dinamico['total_estado_T'] = df_dinamico.groupby('NOMGEO')['pot_T'].transform('sum')
-df_dinamico['total_estado_0'] = df_dinamico.groupby('NOMGEO')['pot_0'].transform('sum')
+# Si se necesitan variables individuales:
+crr_resultado08 = crr_resultados[2008]
+crr_resultado13 = crr_resultados[2013]
+crr_resultado18 = crr_resultados[2018]
+crr_resultado23 = crr_resultados[2023]
 
-# Calculamos las proporciones V_ij / sum(V_ij)
-df_dinamico['prop_T'] = safe_divide(df_dinamico['pot_T'], df_dinamico['total_estado_T'])
-df_dinamico['prop_0'] = safe_divide(df_dinamico['pot_0'], df_dinamico['total_estado_0'])
-
-# Calculamos el valor absoluto de la diferencia
-df_dinamico['diff_abs_crr'] = (df_dinamico['prop_T'] - df_dinamico['prop_0']).abs()
-
-# Sumamos por estado y multiplicamos por 1/2
-crr_resultado = df_dinamico.groupby(['NOMGEO'])['diff_abs_crr'].sum().reset_index()
-crr_resultado['CRr'] = crr_resultado['diff_abs_crr'] * 0.5
+# O un solo DataFrame con todos los años:
+crr_all = pd.concat(crr_resultados.values(), ignore_index=True)
 
 plt.figure(figsize=(10, 12))
-sns.barplot(data=crr_resultado.sort_values('CRr', ascending=False), x='CRr', y='NOMGEO', palette='magma')
+sns.barplot(data=crr_resultado23.sort_values('CRr', ascending=False), x='CRr', y='NOMGEO', palette='magma')
 plt.title('Coeficiente de reestructuración estatal (2004-2023)')
 plt.axvline(0.5, color='red', linestyle='--') # Umbral de cambio profundo
 plt.show()
 
-df_dinamico['total_nacional_sec_T'] = df_dinamico.groupby('AE')['pot_T'].transform('sum')
-df_dinamico['total_nacional_sec_0'] = df_dinamico.groupby('AE')['pot_0'].transform('sum')
+years = [2008, 2013, 2018, 2023]
 
-# Calculamos las participaciones (proporciones geográficas)
-# Si el total nacional es 0 (sector extinto), el resultado será 0
-df_dinamico['part_geo_T'] = safe_divide(df_dinamico['pot_T'], df_dinamico['total_nacional_sec_T'])
-df_dinamico['part_geo_0'] = safe_divide(df_dinamico['pot_0'], df_dinamico['total_nacional_sec_0'])
+# Luego en el bucle:
+for year in years:
+    df_yr = df_dinamico[year]
 
-# Calculamos la diferencia absoluta
-df_dinamico['diff_abs_crs'] = (df_dinamico['part_geo_T'] - df_dinamico['part_geo_0']).abs()
+# Diccionarios para guardar los resultados
+crr_resultados = {}
+crs_resultados = {}
+cuadrante_data = {}
+edj_resultados = {}
+eej_resultados = {}
 
-# Agrupamos por SECTOR (AE) para obtener el CRs final
-crs_resultado = df_dinamico.groupby('AE')['diff_abs_crs'].sum().reset_index()
-crs_resultado['CRs'] = crs_resultado['diff_abs_crs'] * 0.5
+# Precalcular totales nacionales por sector en el año base (2003)
+totales_base_sector = df_base.groupby('AE')['pot_0'].sum().rename('total_base_sector')
+total_nacional_base = df_base['pot_0'].sum()  # para R_nacional
 
-crs_plot = crs_resultado.sort_values('CRs', ascending=False).head(20) # Top 20 para no saturar
+for year in years:
+    df_yr = df_dinamico[year].copy()  # trabajar sobre copia
+
+    # ----- CRr (por estado) -----
+    df_yr['total_estado_T'] = df_yr.groupby('NOMGEO')['pot_T'].transform('sum')
+    df_yr['total_estado_0'] = df_yr.groupby('NOMGEO')['pot_0'].transform('sum')
+    df_yr['prop_T'] = safe_divide(df_yr['pot_T'], df_yr['total_estado_T'])
+    df_yr['prop_0'] = safe_divide(df_yr['pot_0'], df_yr['total_estado_0'])
+    df_yr['diff_abs_crr'] = (df_yr['prop_T'] - df_yr['prop_0']).abs()
+    crr_agg = df_yr.groupby('NOMGEO')['diff_abs_crr'].sum().reset_index()
+    crr_agg['CRr'] = crr_agg['diff_abs_crr'] * 0.5
+    crr_agg['year'] = year
+    crr_resultados[year] = crr_agg[['NOMGEO', 'CRr', 'year']]
+
+    # ----- CRs (por sector) -----
+    df_yr['total_nacional_sec_T'] = df_yr.groupby('AE')['pot_T'].transform('sum')
+    df_yr['total_nacional_sec_0'] = df_yr.groupby('AE')['pot_0'].transform('sum')
+    df_yr['part_geo_T'] = safe_divide(df_yr['pot_T'], df_yr['total_nacional_sec_T'])
+    df_yr['part_geo_0'] = safe_divide(df_yr['pot_0'], df_yr['total_nacional_sec_0'])
+    df_yr['diff_abs_crs'] = (df_yr['part_geo_T'] - df_yr['part_geo_0']).abs()
+    crs_agg = df_yr.groupby('AE')['diff_abs_crs'].sum().reset_index()
+    crs_agg['CRs'] = crs_agg['diff_abs_crs'] * 0.5
+    crs_agg['year'] = year
+    crs_resultados[year] = crs_agg[['AE', 'CRs', 'year']]
+
+    # ----- Crecimiento sectorial y cuadrante -----
+    crecimiento = df_yr.groupby('AE').agg(
+        pot_T_sum=('pot_T', 'sum'),
+        pot_0_sum=('pot_0', 'sum')
+    ).reset_index()
+    crecimiento['rVi'] = safe_divide(crecimiento['pot_T_sum'], crecimiento['pot_0_sum'])
+    cuadrante = pd.merge(crs_agg[['AE', 'CRs']], crecimiento[['AE', 'rVi']], on='AE')
+    cuadrante = cuadrante.replace([np.inf, -np.inf], np.nan).dropna()
+    cuadrante['year'] = year
+    cuadrante_data[year] = cuadrante
+
+    # ----- Efecto Diferencial (EDj) -----
+    # Totales nacionales por sector en año T (valores únicos)
+    totales_T_sector = df_yr.groupby('AE')['pot_T'].sum().reset_index().rename(columns={'pot_T': 'total_T_sector'})
+    df_yr = df_yr.merge(totales_T_sector, on='AE', how='left')
+    df_yr = df_yr.merge(totales_base_sector.reset_index(), on='AE', how='left')
+    df_yr['rSi'] = safe_divide(df_yr['total_T_sector'], df_yr['total_base_sector'])
+    df_yr['valor_esperado'] = df_yr['pot_0'] * df_yr['rSi']
+    df_yr['diff_local'] = df_yr['pot_T'] - df_yr['valor_esperado']
+    edj = df_yr.groupby('NOMGEO')['diff_local'].sum().reset_index()
+    edj.rename(columns={'diff_local': 'EDj'}, inplace=True)
+    edj['year'] = year
+    edj_resultados[year] = edj
+
+    # ----- Efecto Estructural (EEj) -----
+    # Tasa de crecimiento nacional global
+    total_T_global = df_yr['pot_T'].sum()
+    R_nacional = safe_divide(total_T_global, total_nacional_base)
+
+    # Cálculo por fila
+    df_yr['efecto_estructural_sectorial'] = df_yr['pot_0'] * (df_yr['rSi'] - R_nacional)
+
+    # Agregación por estado
+    eej = df_yr.groupby('NOMGEO')['efecto_estructural_sectorial'].sum().reset_index()
+    eej.rename(columns={'efecto_estructural_sectorial': 'EEj'}, inplace=True)
+    eej['year'] = year
+    eej_resultados[year] = eej
+
+    # Limpieza de columnas temporales (opcional)
+    #cols_to_drop = ['total_estado_T', 'total_estado_0', 'prop_T', 'prop_0', 'diff_abs_crr',
+    #                'total_nacional_sec_T', 'total_nacional_sec_0', 'part_geo_T', 'part_geo_0',
+    #                'diff_abs_crs', 'total_T_sector', 'total_base_sector', 'rSi',
+    #                'valor_esperado', 'diff_local', 'efecto_estructural_sectorial']
+    # df_yr.drop(columns=[c for c in cols_to_drop if c in df_yr.columns], inplace=True, errors='ignore')
+
+crs_resultado23= crs_resultados[2023]
+
+crs_plot = crs_resultado23.sort_values('CRs', ascending=False)
 
 plt.figure(figsize=(12, 8))
 sns.set_theme(style="whitegrid")
@@ -954,7 +1910,7 @@ sns.barplot(
     palette='flare' # Degradado de color para enfatizar el cambio
 )
 
-plt.axvline(crs_resultado['CRs'].mean(), color='blue', linestyle='--', label='Promedio Nacional')
+plt.axvline(crs_resultado23['CRs'].mean(), color='blue', linestyle='--', label='Promedio Nacional')
 
 plt.title('Reestructuración geográfica sectorial (2004-2023)', fontsize=15)
 plt.xlabel('Coeficiente de reestructuración sectorial (CRs)', fontsize=12)
@@ -965,7 +1921,16 @@ plt.tight_layout()
 plt.show()
 
 sector_top = crs_plot.iloc[0]['AE']
-detalle = df_dinamico[df_dinamico['AE'] == sector_top][['NOMGEO', 'part_geo_0', 'part_geo_T']]
+
+# Recalcular total_nacional_sec_T y total_nacional_sec_0 for df_dinamico23
+df_dinamico23['total_nacional_sec_T'] = df_dinamico23.groupby('AE')['pot_T'].transform('sum')
+df_dinamico23['total_nacional_sec_0'] = df_dinamico23.groupby('AE')['pot_0'].transform('sum')
+
+# Recalcular part_geo_0 and part_geo_T for df_dinamico23
+df_dinamico23['part_geo_T'] = safe_divide(df_dinamico23['pot_T'], df_dinamico23['total_nacional_sec_T'])
+df_dinamico23['part_geo_0'] = safe_divide(df_dinamico23['pot_0'], df_dinamico23['total_nacional_sec_0'])
+
+detalle = df_dinamico23[df_dinamico23['AE'] == sector_top][['NOMGEO', 'part_geo_0', 'part_geo_T']]
 
 # Graficar los 5 estados que más ganaron y los 5 que más perdieron participación
 detalle['cambio'] = detalle['part_geo_T'] - detalle['part_geo_0']
@@ -974,104 +1939,122 @@ detalle_cambio = detalle.sort_values('cambio', ascending=False)
 print(f"Cambios geográficos para el sector: {sector_top}")
 print(pd.concat([detalle_cambio.head(5), detalle_cambio.tail(5)]))
 
-# Calculamos el crecimiento nacional por sector (rVi)
-crecimiento_sectorial = df_dinamico.groupby('AE').agg({
-    'pot_T': 'sum',
-    'pot_0': 'sum'
-}).reset_index()
+cuadrante_data23 = cuadrante_data[2023]
 
-crecimiento_sectorial['rVi'] = safe_divide(crecimiento_sectorial['pot_T'], crecimiento_sectorial['pot_0'])
+!pip install adjustText
 
-# Unimos con el CRs que ya teníamos
-cuadrante_data = pd.merge(crs_resultado[['AE', 'CRs']], crecimiento_sectorial[['AE', 'rVi']], on='AE')
+from adjustText import adjust_text
 
-# Limpiamos valores infinitos o NaN por si algún sector era nuevo
-cuadrante_data = cuadrante_data.replace([np.inf, -np.inf], np.nan).dropna()
+# 1. Configuración de estilo
+sns.set_theme(style="whitegrid")
+fig, ax = plt.subplots(figsize=(16, 12)) # Aumentamos un poco el tamaño para dar aire a las etiquetas
 
-plt.figure(figsize=(12, 10))
+# 2. Definición de umbrales y cuadrantes (Igual a tu lógica)
+x_med = cuadrante_data23['CRs'].median()
+y_med = 1.0
 
-# Definir los umbrales
-x_med = cuadrante_data['CRs'].median()
-y_med = 1.0 # 1.0 significa crecimiento cero; arriba es crecimiento, abajo es pérdida
+def get_quadrant(row):
+    if row['rVi'] >= y_med and row['CRs'] >= x_med: return 'Estrella (Dinámicos)'
+    elif row['rVi'] >= y_med and row['CRs'] < x_med: return 'Maduros (Crecientes estables)'
+    elif row['rVi'] < y_med and row['CRs'] < x_med: return 'Estáticos (En declive)'
+    else: return 'Transición (Reubicación crítica)'
 
-# Crear el Scatter Plot
-sns.scatterplot(data=cuadrante_data, x='CRs', y='rVi', s=100, alpha=0.6, color='darkblue')
+cuadrante_data23['quadrant'] = cuadrante_data23.apply(get_quadrant, axis=1)
 
-# Añadir las líneas del cuadrante
-plt.axvline(x_med, color='red', linestyle='--', alpha=0.5)
-plt.axhline(y_med, color='red', linestyle='--', alpha=0.5)
+# 3. Graficar todos los puntos
+palette = {
+    'Estrella (Dinámicos)': '#2ecc71',
+    'Maduros (Crecientes estables)': '#3498db',
+    'Estáticos (En declive)': '#95a5a6',
+    'Transición (Reubicación crítica)': '#e67e22'
+}
 
-# Etiquetas para los cuadrantes
-plt.text(cuadrante_data['CRs'].max()*0.8, cuadrante_data['rVi'].max()*0.9, 'ESTRELLA (Dinámicos)', fontsize=12, color='green', fontweight='bold')
-plt.text(cuadrante_data['CRs'].min(), cuadrante_data['rVi'].max()*0.9, 'MADUROS (Crecientes estables)', fontsize=12, color='blue', fontweight='bold')
-plt.text(cuadrante_data['CRs'].min(), cuadrante_data['rVi'].min(), 'ESTÁTICOS (En declive)', fontsize=12, color='gray', fontweight='bold')
-plt.text(cuadrante_data['CRs'].max()*0.8, cuadrante_data['rVi'].min(), 'TRANSICIÓN (Reubicación crítica)', fontsize=12, color='orange', fontweight='bold')
+sns.scatterplot(
+    data=cuadrante_data23, x='CRs', y='rVi',
+    hue='quadrant', palette=palette, s=80, alpha=0.5, # Bajamos s y alpha para que no dominen el gráfico
+    edgecolor='black', linewidth=0.5, ax=ax
+)
 
-# Etiquetar algunos puntos clave (Sectores más extremos)
-top_sectors = pd.concat([cuadrante_data.nlargest(5, 'rVi'), cuadrante_data.nlargest(5, 'CRs')])
-for i, row in top_sectors.iterrows():
-    plt.text(row['CRs']+0.01, row['rVi'], row['AE'], fontsize=9)
+# 4. Líneas divisorias
+ax.axvline(x_med, color='red', linestyle='--', alpha=0.3, lw=1.5)
+ax.axhline(y_med, color='red', linestyle='--', alpha=0.3, lw=1.5)
 
-plt.title('Cuadrante de dinamismo sectorial (2004-2023)', fontsize=15)
-plt.xlabel('Reestructuración geográfica (CRs)', fontsize=12)
-plt.ylabel('Crecimiento relativo nacional (rVi)', fontsize=12)
-plt.yscale('log') # Usamos escala logarítmica si hay crecimientos muy disparados
+# 5. Títulos de cuadrantes (en el fondo para que no estorben)
+# Usamos zorder=1 para que queden "detrás" de las etiquetas si es necesario
+ax.text(0.98, 0.98, 'ESTRELLA', transform=ax.transAxes, fontsize=20, color='#27ae60',
+        fontweight='black', ha='right', va='top', alpha=0.2)
+ax.text(0.02, 0.98, 'MADUROS', transform=ax.transAxes, fontsize=20, color='#2980b9',
+        fontweight='black', ha='left', va='top', alpha=0.2)
+ax.text(0.02, 0.02, 'ESTÁTICOS', transform=ax.transAxes, fontsize=20, color='#7f8c8d',
+        fontweight='black', ha='left', va='bottom', alpha=0.2)
+ax.text(0.98, 0.02, 'TRANSICIÓN', transform=ax.transAxes, fontsize=20, color='#d35400',
+        fontweight='black', ha='right', va='bottom', alpha=0.2)
 
+# 6. ETIQUETAR TODOS LOS PUNTOS
+texts = []
+for i, row in cuadrante_data23.iterrows():
+    # Usamos un tamaño de fuente pequeño (8 o 9) para que quepan todos
+    texts.append(ax.text(row['CRs'], row['rVi'], row['AE'], fontsize=8))
+
+# 7. Configuración CRÍTICA de adjust_text para evitar traslapes masivos
+adjust_text(
+    texts,
+    arrowprops=dict(arrowstyle='->', color='gray', lw=0.5, alpha=0.6),
+    expand_points=(1.5, 1.5), # Empuja las etiquetas lejos de los puntos
+    expand_text=(1.2, 1.2),   # Empuja las etiquetas lejos de otras etiquetas
+    force_points=0.1,         # Fuerza de repulsión de los puntos
+    force_text=0.5,           # Fuerza de repulsión entre textos
+    save_steps=False,
+    ax=ax,
+    precision=0.01,
+    lim=2000                  # Aumentamos el límite de iteraciones para encontrar solución
+)
+
+# 8. Detalles finales
+ax.set_yscale('log')
+ax.set_title('Mapa Completo de Dinamismo Sectorial', fontsize=16, fontweight='bold', pad=15)
+ax.set_xlabel('Reestructuración geográfica (CRs)', fontsize=12)
+ax.set_ylabel('Crecimiento relativo nacional (rVi)', fontsize=12)
+
+# Mover leyenda fuera para ganar espacio
+ax.legend(title='Cuadrantes', bbox_to_anchor=(1.05, 1), loc='upper left')
+
+plt.tight_layout()
 plt.show()
 
 # Definimos los umbrales
-umbral_crs = cuadrante_data['CRs'].median()
+umbral_crs = cuadrante_data23['CRs'].median()
 umbral_crecimiento = 1.0 # Crecimiento positivo
 
 # Filtramos el cuadrante superior derecho
-estrellas = cuadrante_data[
-    (cuadrante_data['CRs'] > umbral_crs) &
-    (cuadrante_data['rVi'] > umbral_crecimiento)
+estrellas23 = cuadrante_data23[
+    (cuadrante_data23['CRs'] > umbral_crs) &
+    (cuadrante_data23['rVi'] > umbral_crecimiento)
 ].copy()
 
 # Ordenamos por dinamismo (una combinación de ambos factores)
-estrellas['puntuacion_dinamismo'] = estrellas['CRs'] * estrellas['rVi']
-estrellas_ranking = estrellas.sort_values('puntuacion_dinamismo', ascending=False)
+estrellas23['puntuacion_dinamismo'] = estrellas23['CRs'] * estrellas23['rVi']
+estrellas_ranking23 = estrellas23.sort_values('puntuacion_dinamismo', ascending=False)
 
 # Mostrar el Top 10 de sectores Estrella
 print("Top 10 Sectores Estrella (Dinámicos y en Reubicación):")
-print(estrellas_ranking[['AE', 'CRs', 'rVi']].head(10))
+print(estrellas_ranking23[['AE', 'CRs', 'rVi']].head(10))
 
 # Tomamos el sector líder de las estrellas
-sector_lider = estrellas_ranking.iloc[0]['AE']
+sector_lider23 = estrellas_ranking23.iloc[0]['AE']
 
 # Buscamos en qué estados creció más su participación
-ganadores = df_dinamico[df_dinamico['AE'] == sector_lider].copy()
-ganadores['cambio_participacion'] = ganadores['part_geo_T'] - ganadores['part_geo_0']
+ganadores23 = df_dinamico23[df_dinamico23['AE'] == sector_lider23].copy()
+ganadores23['cambio_participacion'] = ganadores23['part_geo_T'] - ganadores23['part_geo_0']
 
-print(f"\nEstados que 'conquistaron' el sector {sector_lider}:")
-print(ganadores.sort_values('cambio_participacion', ascending=False)[['NOMGEO', 'cambio_participacion']].head(5))
+print(f"\nEstados que 'conquistaron' el sector {sector_lider23}:")
+print(ganadores23.sort_values('cambio_participacion', ascending=False)[['NOMGEO', 'cambio_participacion']].head(5))
 
-# Calcular rSi: Tasa de crecimiento nacional por sector (i)
-# Usamos los totales nacionales que calculamos para el CRs
-crecimiento_nacional_it = df_dinamico.groupby('AE')['pot_T'].sum()
-crecimiento_nacional_i0 = df_dinamico.groupby('AE')['pot_0'].sum()
-
-# rSi = V_i(t) / V_i(0)
-rsi = (crecimiento_nacional_it / crecimiento_nacional_i0).rename('rsi')
-
-# Unir rSi al dataframe dinámico
-df_shift = pd.merge(df_dinamico, rsi, on='AE', how='left')
-
-# Calcular el Valor Esperado (lo que se supone que debía crecer según la nación)
-# Valor_esperado = V_ij(0) * rSi
-df_shift['valor_esperado'] = df_shift['pot_0'] * df_shift['rsi']
-
-# Calcular el Efecto Diferencial (EDj) por estado
-# Es la suma de (Lo observado - Lo esperado)
-df_shift['diff_local'] = df_shift['pot_T'] - df_shift['valor_esperado']
-
-edj_resultado = df_shift.groupby(['NOMGEO'])['diff_local'].sum().reset_index()
-edj_resultado.rename(columns={'diff_local': 'EDj'}, inplace=True)
+edj_resultados23 = edj_resultados[2023]
 
 plt.figure(figsize=(12, 10))
 # Ordenamos para ver quién tiene mayor ventaja competitiva
-edj_sorted = edj_resultado.sort_values('EDj', ascending=False)
+edj_sorted = edj_resultados23.sort_values('EDj', ascending=False)
 
 sns.barplot(data=edj_sorted, x='EDj', y='NOMGEO',
             palette=['green' if x > 0 else 'red' for x in edj_sorted['EDj']])
@@ -1085,51 +2068,96 @@ plt.show()
 iact_estatal = df[df['tcode'] == 2023].groupby(['NOMGEO'])['iact_norm'].mean().reset_index()
 
 # 2. Unimos con el Efecto Diferencial (EDj)
-analisis_final = pd.merge(edj_resultado, iact_estatal, on=['NOMGEO'])
+analisis_final = pd.merge(edj_resultados23, iact_estatal, on=['NOMGEO'])
 
 # 3. Calculamos la correlación para ver qué tan fuerte es la relación
 correlacion = analisis_final['EDj'].corr(analisis_final['iact_norm'])
 print(f"La correlación entre tecnología y competitividad es: {correlacion:.2f}")
 
-plt.figure(figsize=(14, 9))
-sns.set_theme(style="whitegrid")
+from matplotlib.patches import Patch
 
-# Definir los umbrales de los cuadrantes
+# 1. Configuración de umbrales y CONTEO
 x_med = analisis_final['iact_norm'].mean()
-y_med = 0  # El EDj es 0 para el equilibrio de competitividad
+y_med = 0
 
-# Crear el scatter plot base
-scatter = sns.scatterplot(
-    data=analisis_final,
-    x='iact_norm', y='EDj',
-    size='iact_norm', hue='EDj',
-    palette='RdYlGn', sizes=(100, 1000), alpha=0.6
-)
+def definir_cuadrante(row):
+    if row['iact_norm'] >= x_med and row['EDj'] >= y_med: return 'Líderes'
+    elif row['iact_norm'] < x_med and row['EDj'] >= y_med: return 'Eficientes'
+    elif row['iact_norm'] < x_med and row['EDj'] < y_med: return 'Rezagados'
+    else: return 'Falla de absorción'
 
-# Función para filtrar y etiquetar el Top 3 por cuadrante
-def etiquetar_top_cuadrantes(df, x_col, y_col, name_col, x_m, y_m):
-    # Cuadrante 1: Alto IACT, Alto EDj (Líderes)
-    c1 = df[(df[x_col] >= x_m) & (df[y_col] >= y_m)].nlargest(3, y_col)
-    # Cuadrante 2: Bajo IACT, Alto EDj (Eficientes)
-    c2 = df[(df[x_col] < x_m) & (df[y_col] >= y_m)].nlargest(3, y_col)
-    # Cuadrante 3: Bajo IACT, Bajo EDj (Rezagados)
-    c3 = df[(df[x_col] < x_m) & (df[y_col] < y_m)].nsmallest(3, y_col)
-    # Cuadrante 4: Alto IACT, Bajo EDj (Falla de Absorción)
-    c4 = df[(df[x_col] >= x_m) & (df[y_col] < y_m)].nsmallest(3, y_col)
+analisis_final['Cuadrante'] = analisis_final.apply(definir_cuadrante, axis=1)
+# Diccionario de conteo para etiquetas dinámicas
+counts = analisis_final['Cuadrante'].value_counts().to_dict()
 
-    tops = pd.concat([c1, c2, c3, c4])
+# 2. Configuración de la figura
+fig = plt.figure(figsize=(18, 14))
+gs = fig.add_gridspec(2, 1, height_ratios=[10, 2.5], hspace=0.3)
+ax = fig.add_subplot(gs[0])
 
-    for i, row in tops.iterrows():
-        plt.text(row[x_col] + 0.005, row[y_col], row[name_col],
-                 fontsize=11, fontweight='bold', alpha=0.9)
+colors = {
+    'Líderes': {'bg': '#d4edda', 'text': '#155724'},
+    'Eficientes': {'bg': '#d1ecf1', 'text': '#0c5460'},
+    'Rezagados': {'bg': '#f8d7da', 'text': '#721c24'},
+    'Falla de absorción': {'bg': '#fff3cd', 'text': '#856404'}
+}
 
-# Aplicar la función de etiquetado
-etiquetar_top_cuadrantes(analisis_final, 'iact_norm', 'EDj', 'NOMGEO', x_med, y_med)
+# 3. Límites y Sombreado con fill_between (Anclado a los ejes)
+x_min, x_max = analisis_final['iact_norm'].min(), analisis_final['iact_norm'].max()
+y_min, y_max = analisis_final['EDj'].min(), analisis_final['EDj'].max()
+margin_x = (x_max - x_min) * 0.15
+margin_y = (y_max - y_min) * 0.15
 
-# Líneas y estética
-plt.axhline(y_med, color='black', linestyle='--', alpha=0.4)
-plt.axvline(x_med, color='blue', linestyle='--', alpha=0.4)
-plt.title('Top 3 Estados por Perfil Tecnológico y Competitivo', fontsize=16)
+# Sombreados precisos
+ax.fill_between([x_med, x_max + margin_x], y_med, y_max + margin_y, facecolor=colors['Líderes']['bg'], alpha=0.3, zorder=0)
+ax.fill_between([x_min - margin_x, x_med], y_med, y_max + margin_y, facecolor=colors['Eficientes']['bg'], alpha=0.3, zorder=0)
+ax.fill_between([x_min - margin_x, x_med], y_min - margin_y, y_med, facecolor=colors['Rezagados']['bg'], alpha=0.3, zorder=0)
+ax.fill_between([x_med, x_max + margin_x], y_min - margin_y, y_med, facecolor=colors['Falla de absorción']['bg'], alpha=0.3, zorder=0)
+
+# 4. Anotaciones de Títulos de Cuadrantes + Conteo (Marcas de agua)
+ax.text(0.98, 0.98, f"LÍDERES\n({counts.get('Líderes', 0)} Estados)", transform=ax.transAxes,
+        ha='right', va='top', fontsize=16, fontweight='black', color=colors['Líderes']['text'], alpha=0.15)
+ax.text(0.02, 0.98, f"EFICIENTES\n({counts.get('Eficientes', 0)} Estados)", transform=ax.transAxes,
+        ha='left', va='top', fontsize=16, fontweight='black', color=colors['Eficientes']['text'], alpha=0.15)
+ax.text(0.02, 0.02, f"REZAGADOS\n({counts.get('Rezagados', 0)} Estados)", transform=ax.transAxes,
+        ha='left', va='bottom', fontsize=16, fontweight='black', color=colors['Rezagados']['text'], alpha=0.15)
+ax.text(0.98, 0.02, f"FALLA DE ABSORCIÓN\n({counts.get('Falla de absorción', 0)} Estados)", transform=ax.transAxes,
+        ha='right', va='bottom', fontsize=16, fontweight='black', color=colors['Falla de absorción']['text'], alpha=0.15)
+
+# 5. Scatter plot y etiquetas
+sns.scatterplot(data=analisis_final, x='iact_norm', y='EDj', size='iact_norm', hue='EDj',
+                palette='RdYlGn', sizes=(60, 500), alpha=0.6, edgecolor='black', ax=ax, zorder=2)
+
+texts = []
+for i, row in analisis_final.iterrows():
+    col_ref = colors[row['Cuadrante']]['text']
+    texts.append(ax.text(row['iact_norm'], row['EDj'], row['NOMGEO'], fontsize=9,
+                         fontweight='bold', color=col_ref,
+                         bbox=dict(facecolor='white', alpha=0.6, edgecolor='none', pad=0.3)))
+
+adjust_text(texts, ax=ax, arrowprops=dict(arrowstyle='->', color='black', lw=0.5, alpha=0.3),
+            expand_points=(2.5, 2.5), expand_text=(1.5, 1.5), lim=5000)
+
+# 6. Finalización de Ejes
+ax.axhline(y_med, color='black', lw=1.2, alpha=0.4, zorder=1)
+ax.axvline(x_med, color='black', lw=1.2, alpha=0.4, zorder=1)
+ax.set_xlim(x_min - margin_x, x_max + margin_x)
+ax.set_ylim(y_min - margin_y, y_max + margin_y)
+
+# Leyenda con conteo integrado
+legend_elements = [Patch(facecolor=v['bg'], label=f"{k} ({counts.get(k, 0)})") for k, v in colors.items()]
+ax.legend(handles=legend_elements, title='Cuadrantes (n=32)', loc='center left', bbox_to_anchor=(1, 0.5))
+
+# 7. TABLA RESUMEN (Top 5 por Impacto)
+# analisis_final['Impacto'] = (analisis_final['iact_norm'] * analisis_final['EDj']).abs()
+# top_5 = analisis_final.nlargest(5, 'Impacto')[['NOMGEO', 'iact_norm', 'EDj', 'Cuadrante']].round(3)
+
+# ax_table = fig.add_subplot(gs[1])
+# ax_table.axis('off')
+#res_table = ax_table.table(cellText=top_5.values, colLabels=['Estado', 'IACT Norm', 'Efecto (EDj)', 'Clasificación'],
+#                          cellLoc='center', loc='center', colColours=['#f2f2f2']*4)
+# res_table.set_fontsize(10)
+# res_table.scale(1, 1.8)
 
 plt.show()
 
@@ -1145,118 +2173,233 @@ analisis_final['Perfil_Estratégico'] = analisis_final.apply(asignar_perfil, arg
 resumen_perfiles = analisis_final['Perfil_Estratégico'].value_counts()
 print(resumen_perfiles)
 
-# Calcular la tasa de crecimiento nacional global (R_nacional)
-total_t = df_dinamico['pot_T'].sum()
-total_0 = df_dinamico['pot_0'].sum()
-R_nacional = total_t / total_0
-
-# Aplicar la fórmula del Efecto Estructural (EEj)
-# EEj = suma de { V_ij(0) * (rSi - R_nacional) }
-df_shift['efecto_estructural_sectorial'] = df_shift['pot_0'] * (df_shift['rsi'] - R_nacional)
-
-eej_resultado = df_shift.groupby(['NOMGEO'])['efecto_estructural_sectorial'].sum().reset_index()
-eej_resultado.rename(columns={'efecto_estructural_sectorial': 'EEj'}, inplace=True)
+eej_resultados23 = eej_resultados[2023]
 
 # Unir todos los componentes en una tabla maestra
-resumen_shift_share = pd.merge(edj_resultado, eej_resultado, on=['NOMGEO'])
+resumen_shift_share = pd.merge(edj_resultados23, eej_resultados23, on=['NOMGEO'])
 
 # Añadir el crecimiento total observado para comparar
-crecimiento_total = df_dinamico.groupby(['NOMGEO'])['pot_T'].sum() - \
-                   df_dinamico.groupby(['NOMGEO'])['pot_0'].sum()
+crecimiento_total = df_dinamico[2023].groupby(['NOMGEO'])['pot_T'].sum() - \
+                   df_dinamico[2023].groupby(['NOMGEO'])['pot_0'].sum()
 resumen_shift_share['Crecimiento_Total'] = crecimiento_total.values
 
-resumen_shift_share.set_index('NOMGEO')[['EEj', 'EDj']].plot(kind='bar', stacked=True, figsize=(15,7))
-plt.title('Descomposición del Crecimiento Estatal: Estructura vs. Competitividad')
-plt.ylabel('Personal Ocupado')
-plt.axhline(0, color='black')
-plt.show()
+sns.set_theme(style="white") # Fondo blanco puro
 
-# Calcular inversos de tasas de crecimiento (T0 / Tt)
-# Inverso Nacional
-inverso_R_nacional = df_dinamico['pot_0'].sum() / df_dinamico['pot_T'].sum()
+# Ordenamos por la suma total para dar estructura
+df_sorted = resumen_shift_share.copy()
+df_sorted['Total'] = df_sorted['EEj'] + df_sorted['EDj']
+df_sorted = df_sorted.sort_values(by='Total', ascending=True)
 
-# Inverso Estatal (por cada estado)
-totales_estatales = df_dinamico.groupby(['NOMGEO']).agg({
-    'pot_T': 'sum',
-    'pot_0': 'sum'
-}).reset_index()
+fig, ax = plt.subplots(figsize=(14, 16))
 
-totales_estatales['inverso_R_estatal'] = totales_estatales['pot_0'] / totales_estatales['pot_T']
+# Graficamos EEj a la izquierda (valores negativos falsos)
+ax.barh(df_sorted['NOMGEO'], -df_sorted['EEj'], color='#2ecc71', label='Estructura (EEj)', alpha=0.8)
 
-# 2. Unir al dataframe principal
-df_shift = pd.merge(df_shift, totales_estatales[['NOMGEO', 'inverso_R_estatal']], on='NOMGEO', how='left')
+# Graficamos EDj a la derecha
+ax.barh(df_sorted['NOMGEO'], df_sorted['EDj'], color='#9b59b6', label='Competitividad (EDj)', alpha=0.8)
 
-# 3. Aplicar la fórmula del Efecto Inercial por sector
-# EI = V(t) * (Inverso_Nac - Inverso_Est)
-df_shift['ei_sectorial'] = df_shift['pot_T'] * (inverso_R_nacional - df_shift['inverso_R_estatal'])
+# Línea base cero central prominente
+ax.axvline(0, color='black', linestyle='-', lw=2)
 
-# 4. Agrupar por estado para obtener el EIj final
-eij_resultado = df_shift.groupby(['NOMGEO'])['ei_sectorial'].sum().reset_index()
-eij_resultado.rename(columns={'ei_sectorial': 'EIj'}, inplace=True)
+# Ajustar etiquetas del eje X para que no muestren negativos falsos
+import matplotlib.ticker as ticker
+@ticker.FuncFormatter
+def abs_formatter(x, pos):
+    return f"{abs(int(x)):,}"
+ax.xaxis.set_major_formatter(abs_formatter)
 
-eij_plot = eij_resultado.sort_values('EIj', ascending=False)
+# Personalización
+ax.set_title('Contraste de Crecimiento: Estructura vs. Competitividad', fontsize=20, fontweight='bold', pad=25)
+ax.set_ylabel('', fontsize=12)
+ax.set_xlabel('Personal Ocupado (Absoluto)', fontsize=12)
+ax.legend(loc='upper right', frameon=True)
 
-# Crear el gráfico
-plt.figure(figsize=(10, 12))
-colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in eij_plot['EIj']]
-
-sns.barplot(
-    data=eij_plot,
-    x='EIj',
-    y='NOMGEO',
-    palette=colors
-)
-
-# 3. Estética y referencias
-plt.axvline(0, color='black', linewidth=1.5, linestyle='-')
-plt.title('Efecto Inercial ($EI_j$): Inercia del Crecimiento Estatal vs. Nacional\n(2004-2023)', fontsize=14)
-plt.xlabel('Magnitud del Efecto Inercial (Positivo = Ritmo superior al Nacional)', fontsize=12)
-plt.ylabel('Entidad Federativa', fontsize=12)
-plt.grid(axis='x', linestyle='--', alpha=0.6)
+# Quitar bordes innecesarios y limpiar cuadrícula
+sns.despine(left=True, bottom=True)
+ax.grid(axis='x', color='gray', linestyle='--', alpha=0.3)
 
 plt.tight_layout()
 plt.show()
 
-# Preparar datos: Crecimiento Nacional (CN), Efecto Estructural (EEj) y Diferencial (EDj)
-# Nota: CN = V_ij(0) * (R_nacional - 1)
-resumen_shift_share['CN'] = df_dinamico.groupby(['NOMGEO'])['pot_0'].sum().values * (R_nacional - 1)
+# 1. Clasificación y Conteo de Estados
+x_med, y_med = 0, 0
 
-plot_data = resumen_shift_share.set_index('NOMGEO')[['CN', 'EEj', 'EDj']]
+def clasificar(row):
+    if row['EEj'] >= x_med and row['EDj'] >= y_med: return 'Dinamismo Mixto'
+    elif row['EEj'] < x_med and row['EDj'] >= y_med: return 'Falla Estructural'
+    elif row['EEj'] < x_med and row['EDj'] < y_med: return 'Rezagados'
+    else: return 'Falla de Absorción'
 
-# Graficar
-ax = plot_data.sort_values('CN', ascending=True).plot(
-    kind='barh',
-    stacked=True,
-    figsize=(12, 10),
-    color=['#3498db', '#f1c40f', '#2ecc71']
-)
+resumen_shift_share['Cuadrante'] = resumen_shift_share.apply(clasificar, axis=1)
+conteos = resumen_shift_share['Cuadrante'].value_counts()
 
-plt.axvline(0, color='black', linewidth=0.8)
-plt.title('Componentes del Cambio en el Personal Ocupado (2004-2023)', fontsize=15)
-plt.xlabel('Número de Personas Ocupadas')
-plt.legend(['Crecimiento Nacional (Inercia)', 'Efecto Estructural (Mezcla)', 'Efecto Diferencial (Competitividad)'])
+# 2. Configuración de estilo
+sns.set_theme(style="white")
+fig, ax = plt.subplots(figsize=(16, 12))
+
+# Límites y márgenes
+x_min, x_max = resumen_shift_share['EEj'].min(), resumen_shift_share['EEj'].max()
+y_min, y_max = resumen_shift_share['EDj'].min(), resumen_shift_share['EDj'].max()
+margin_x = (x_max - x_min) * 0.15
+margin_y = (y_max - y_min) * 0.15
+
+colors = {
+    'Dinamismo Mixto': {'bg': '#d4edda', 'text': '#155724', 'label': 'EEj(+), EDj(+)'},
+    'Falla Estructural': {'bg': '#d1ecf1', 'text': '#0c5460', 'label': 'EEj(-), EDj(+)'},
+    'Rezagados': {'bg': '#f8d7da', 'text': '#721c24', 'label': 'EEj(-), EDj(-)'},
+    'Falla de Absorción': {'bg': '#fff3cd', 'text': '#856404', 'label': 'EEj(+), EDj(-)'}
+}
+
+# 3. Sombreado de cuadrantes con fill_between
+ax.fill_between([x_med, x_max + margin_x], y_med, y_max + margin_y, facecolor=colors['Dinamismo Mixto']['bg'], alpha=0.3, zorder=0)
+ax.fill_between([x_min - margin_x, x_med], y_med, y_max + margin_y, facecolor=colors['Falla Estructural']['bg'], alpha=0.3, zorder=0)
+ax.fill_between([x_min - margin_x, x_med], y_min - margin_y, y_med, facecolor=colors['Rezagados']['bg'], alpha=0.3, zorder=0)
+ax.fill_between([x_med, x_max + margin_x], y_min - margin_y, y_med, facecolor=colors['Falla de Absorción']['bg'], alpha=0.3, zorder=0)
+
+# 4. Títulos de cuadrantes dentro del gráfico (Marcas de agua)
+# Colocamos el nombre y cuántos estados hay en cada esquina
+ax.text(0.95, 0.95, f"DINAMISMO MIXTO\n({conteos.get('Dinamismo Mixto', 0)} Estados)", transform=ax.transAxes,
+        ha='right', va='top', fontsize=14, fontweight='black', color=colors['Dinamismo Mixto']['text'], alpha=0.2)
+ax.text(0.05, 0.95, f"FALLA ESTRUCTURAL\n({conteos.get('Falla Estructural', 0)} Estados)", transform=ax.transAxes,
+        ha='left', va='top', fontsize=14, fontweight='black', color=colors['Falla Estructural']['text'], alpha=0.2)
+ax.text(0.05, 0.05, f"REZAGADOS\n({conteos.get('Rezagados', 0)} Estados)", transform=ax.transAxes,
+        ha='left', va='bottom', fontsize=14, fontweight='black', color=colors['Rezagados']['text'], alpha=0.2)
+ax.text(0.95, 0.05, f"FALLA DE ABSORCIÓN\n({conteos.get('Falla de Absorción', 0)} Estados)", transform=ax.transAxes,
+        ha='right', va='bottom', fontsize=14, fontweight='black', color=colors['Falla de Absorción']['text'], alpha=0.2)
+
+# 5. Scatter plot y etiquetas
+sns.scatterplot(data=resumen_shift_share, x='EEj', y='EDj', s=120, alpha=0.8, edgecolor='black', ax=ax, zorder=2, color='white')
+
+texts = []
+for i, row in resumen_shift_share.iterrows():
+    col_ref = colors[row['Cuadrante']]['text']
+    texts.append(ax.text(row['EEj'], row['EDj'], row['NOMGEO'], fontsize=9, fontweight='bold', color=col_ref,
+                         bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=0.3)))
+
+adjust_text(texts, ax=ax, arrowprops=dict(arrowstyle='->', color='black', lw=0.5, alpha=0.3))
+
+# 6. Finalización
+ax.set_xlim(x_min - margin_x, x_max + margin_x)
+ax.set_ylim(y_min - margin_y, y_max + margin_y)
+ax.axhline(0, color='black', lw=1.5, alpha=0.3)
+ax.axvline(0, color='black', lw=1.5, alpha=0.3)
+
+ax.set_title('Diagnóstico Shift-Share: Clasificación por estado', fontsize=20, fontweight='bold', pad=25)
+ax.set_xlabel('Efecto estructural (EEj)', fontsize=13)
+ax.set_ylabel('Efecto diferencial (EDj)', fontsize=13)
+
+# Leyenda con conteo incluido
+legend_elements = [Patch(facecolor=v['bg'], label=f"{k}: {conteos.get(k, 0)} est. ({v['label']})") for k, v in colors.items()]
+ax.legend(handles=legend_elements, title='Resumen de clasificación', loc='center left', bbox_to_anchor=(1, 0.5), fontsize=10)
+
+sns.despine()
 plt.tight_layout()
 plt.show()
 
-plt.figure(figsize=(10, 8))
-sns.scatterplot(data=resumen_shift_share, x='EEj', y='EDj', s=100, color='red')
+# 1. Preparación de datos y ordenamiento lógico
+# Ordenamos por la suma de EEj + EDj (Crecimiento Neto Local) para resaltar competitividad
+resumen_shift_share['Neto_Local'] = resumen_shift_share['EEj'] + resumen_shift_share['EDj']
+df_plot = resumen_shift_share.sort_values('Neto_Local', ascending=True)
 
-# Líneas cruzadas en el origen (0,0)
-plt.axhline(0, color='black', linestyle='--', alpha=0.5)
-plt.axvline(0, color='black', linestyle='--', alpha=0.5)
+# 2. Configuración estética
+sns.set_theme(style="white")
+fig, ax = plt.subplots(figsize=(14, 12))
 
-# Etiquetas de cuadrantes
-plt.text(resumen_shift_share['EEj'].max()*0.5, resumen_shift_share['EDj'].max()*0.8, 'GANADORES\n(Sectores dinámicos + Eficiencia)', color='green', fontweight='bold')
-plt.text(resumen_shift_share['EEj'].min()*0.8, resumen_shift_share['EDj'].max()*0.8, 'SOBREVIVIENTES\n(Sectores lentos + Eficiencia)', color='blue', fontweight='bold')
-plt.text(resumen_shift_share['EEj'].min()*0.8, resumen_shift_share['EDj'].min()*0.8, 'REZAGADOS\n(Sectores lentos + Ineficiencia)', color='red', fontweight='bold')
+# 3. Crear el gráfico de barras horizontales
+# Usaremos un pequeño truco: CN será una barra sutil y EEj/EDj serán el foco
+states = df_plot['NOMGEO']
+cn = df_plot['Crecimiento_Total'] # Fixed: Changed 'CN' to 'Crecimiento_Total'
+eej = df_plot['EEj']
+edj = df_plot['EDj']
 
-# Etiquetar solo los 5 estados más extremos
-for i, row in resumen_shift_share.nlargest(5, 'EDj').iterrows():
-    plt.text(row['EEj'], row['EDj'], row['NOMGEO'])
+# Barras de Crecimiento Nacional (Fondo gris/azul sutil - La "marea" que sube a todos)
+ax.barh(states, cn, color='#ecf0f1', label='Crecimiento Nacional (Inercia)', height=0.8, zorder=1)
 
-plt.title('Matriz de Diagnóstico Regional: Estructura vs. Competitividad', fontsize=14)
-plt.xlabel('Efecto Estructural (EEj)')
-plt.ylabel('Efecto Diferencial (EDj)')
+# Barras de Efecto Estructural (Sobrepuestas o apiladas)
+ax.barh(states, eej, left=0, color='#f1c40f', label='Efecto Estructural (Mezcla)', height=0.5, zorder=2)
+
+# Barras de Efecto Diferencial (Competitividad - El foco principal)
+ax.barh(states, edj, left=eej, color='#2ecc71', label='Efecto Diferencial (Competitividad)', height=0.5, zorder=3)
+
+# 4. Línea de referencia y formato de impacto
+ax.axvline(0, color='black', linewidth=1.5, alpha=0.7)
+
+# Añadir etiquetas de valor total al final de las barras para lectura rápida
+for i, (total, neto) in enumerate(zip(df_plot['Crecimiento_Total'] + df_plot['Neto_Local'], df_plot['Neto_Local'])): # Fixed: Changed 'CN' to 'Crecimiento_Total'
+    color_label = '#27ae60' if total > 0 else '#c0392b'
+    ax.text(total + (max(cn)*0.02 if total > 0 else -max(cn)*0.02), i,
+            f'{int(total):,}', va='center', fontsize=9, fontweight='bold', color=color_label)
+
+# 5. Títulos y anotaciones
+ax.set_title('Análisis de desempeño regional: ¿Quién crece por mérito propio?',
+             fontsize=18, fontweight='black', pad=30, loc='left')
+ax.set_xlabel('Cambio en el personal ocupado (Personas)', fontsize=12, labelpad=15)
+
+# Subtítulo explicativo
+ax.text(0, 1.02, 'Las barras de colores muestran el crecimiento generado por la estructura local y la competitividad estatal.',
+        transform=ax.transAxes, fontsize=11, color='gray')
+
+# 6. Leyenda profesional
+ax.legend(loc='lower right', frameon=True, shadow=True, borderpad=1)
+
+sns.despine(left=True, bottom=True)
+plt.tight_layout()
+plt.show()
+
+# 1. Preparación de datos
+# Calculamos el desempeño neto (EEj + EDj)
+resumen_shift_share['Neto_Local'] = resumen_shift_share['EEj'] + resumen_shift_share['EDj']
+# Ordenamos por el impacto total (CN + Neto) para dar estructura visual
+df_bullet = resumen_shift_share.sort_values(by='Crecimiento_Total', ascending=True)
+
+# 2. Configuración de la figura
+sns.set_theme(style="white")
+fig, ax = plt.subplots(figsize=(14, 12))
+
+states = df_bullet['NOMGEO']
+cn = df_bullet['Crecimiento_Total']
+eej = df_bullet['EEj']
+edj = df_bullet['EDj']
+total_change = cn + eej + edj
+
+# 3. Dibujar el Bullet Chart
+# Barra de fondo: El Crecimiento Nacional (Inercia)
+ax.barh(states, cn, color='#dfe6e9', label='Crecimiento Nacional (Expectativa)', height=0.6, zorder=1)
+
+# Barra de Desempeño Real: EEj + EDj (empezando desde el 0)
+# Esto muestra el "empuje" propio del estado
+ax.barh(states, eej, color='#f1c40f', label='Efecto Estructural (Mezcla)', height=0.3, zorder=2)
+ax.barh(states, edj, left=eej, color='#2ecc71', label='Efecto Diferencial (Competitividad)', height=0.3, zorder=3)
+
+# 4. Marcador de "Meta": El cambio total esperado si solo dependiera de la inercia
+# Dibujamos una línea vertical por cada estado al final de su CN
+for i, val in enumerate(cn):
+    ax.vlines(val, i - 0.35, i + 0.35, color='#2d3436', linewidth=2, zorder=4)
+
+# 5. Resaltar estados que superaron o no llegaron a la inercia nacional
+for i, (val_cn, val_total) in enumerate(zip(cn, total_change)):
+    diff = val_total - val_cn
+    color_diff = '#27ae60' if diff > 0 else '#c0392b'
+    prefix = '+' if diff > 0 else ''
+    ax.text(max(val_cn, val_total) + (max(cn)*0.01), i,
+            f'{prefix}{int(diff):,}', va='center', fontsize=9,
+            fontweight='bold', color=color_diff)
+
+# 6. Estética y Títulos
+ax.set_title('Bullet Chart: Desempeño real vs. Inercia nacional', fontsize=18, fontweight='bold', pad=25)
+ax.set_xlabel('Personas ocupadas (Absoluto)', fontsize=12)
+
+# Leyenda personalizada
+legend_elements = [
+    plt.Rectangle((0,0),1,1, color='#dfe6e9', label='Inercia nacional'),
+    plt.Line2D([0], [0], color='#2d3436', lw=2, label='Marca de referencia (Crecimiento)'),
+    plt.Rectangle((0,0),1,1, color='#f1c40f', label='Efecto estructural'),
+    plt.Rectangle((0,0),1,1, color='#2ecc71', label='Efecto diferencial')
+]
+ax.legend(handles=legend_elements, loc='lower right', frameon=True, shadow=True)
+
+sns.despine(left=True, bottom=True)
+plt.tight_layout()
 plt.show()
 
 def veredicto(row):
@@ -1270,68 +2413,115 @@ resumen_shift_share['Conclusión'] = resumen_shift_share.apply(veredicto, axis=1
 # Mostrar los estados más interesantes
 print(resumen_shift_share[['NOMGEO', 'EEj', 'EDj', 'Conclusión']].sort_values('EDj', ascending=False))
 
-# Calcular el promedio de automatización por sector (AE) en 2023
+# 1. Calcular rsi (tasa de crecimiento nacional del sector 2003-2023)
+
+# Asegurarse de que df tiene columna 'tcode' con años
+
+total_2003 = df[df['tcode'] == 2003].groupby('AE')['pot'].sum().rename('pot_2003')
+
+total_2023 = df[df['tcode'] == 2023].groupby('AE')['pot'].sum().rename('pot_2023')
+
+rsi_df = pd.concat([total_2003, total_2023], axis=1).reset_index()
+
+rsi_df['rsi'] = rsi_df['pot_2023'] / rsi_df['pot_2003']
+
+rsi = rsi_df.set_index('AE')['rsi']  # Serie con índice AE
+
+
+
+# 2. Calcular automatización por sector en 2023
+
 automa_sectorial = df[df['tcode'] == 2023].groupby('AE').agg({
+
     'atmep': 'sum',
+
     'ppvs': 'sum',
+
     'pot': 'sum'
+
 }).reset_index()
 
 automa_sectorial['automa'] = automa_sectorial['atmep'] / automa_sectorial['ppvs']
 
-# Unir con la tasa de crecimiento rSi
-bubble_data = pd.merge(automa_sectorial, rsi.reset_index(), on='AE')
+# Crear bubble_data uniendo rsi y automa_sectorial
+bubble_data = automa_sectorial.merge(rsi.rename('rsi'), on='AE', how='left')
 
-# Limpiar valores para el gráfico (evitar división por cero o NaNs)
-bubble_data = bubble_data.replace([np.inf, -np.inf], np.nan).dropna()
+from scipy.stats import pearsonr, spearmanr
 
-plt.figure(figsize=(14, 10))
+# 1. Análisis de Correlación
+# Usamos Pearson para relación lineal y Spearman para relación no lineal (mejor en escalas log)
+corr_p, p_val_p = pearsonr(bubble_data['automa'], bubble_data['rsi'])
+corr_s, p_val_s = spearmanr(bubble_data['automa'], bubble_data['rsi'])
 
-# Crear el gráfico de burbujas
-# Eje X: Automatización (Log para manejar escalas grandes)
-# Eje Y: Crecimiento Sectorial
-# Tamaño: Personal Ocupado Total (pot)
-scatter = plt.scatter(
-    x=bubble_data['automa'],
-    y=bubble_data['rsi'],
-    s=bubble_data['pot'] / 100, # Ajustar escala del tamaño
-    alpha=0.5,
-    c=bubble_data['rsi'],
-    cmap='viridis',
-    edgecolors="w",
-    linewidth=1
+# 2. Configuración de Umbrales Reales
+x_med = bubble_data['automa'].median()
+y_ref = 1.0  # Punto de equilibrio de crecimiento
+
+# 3. Preparación de la Figura
+fig, ax = plt.subplots(figsize=(16, 12))
+sns.set_theme(style="white")
+
+# Límites para el sombreado (ajustados a la escala logarítmica)
+x_lims = [bubble_data['automa'].min() * 0.5, bubble_data['automa'].max() * 2]
+y_lims = [bubble_data['rsi'].min() - 0.2, bubble_data['rsi'].max() + 0.2]
+
+# 4. Sombreado de Cuadrantes con Alineación Exacta
+# Superior Derecho (Verde)
+ax.fill_between([x_med, x_lims[1]], y_ref, y_lims[1], facecolor='#d4edda', alpha=0.3, zorder=0)
+# Superior Izquierdo (Azul)
+ax.fill_between([x_lims[0], x_med], y_ref, y_lims[1], facecolor='#d1ecf1', alpha=0.3, zorder=0)
+# Inferior Izquierdo (Rojo)
+ax.fill_between([x_lims[0], x_med], y_lims[0], y_ref, facecolor='#f8d7da', alpha=0.3, zorder=0)
+# Inferior Derecho (Amarillo)
+ax.fill_between([x_med, x_lims[1]], y_lims[0], y_ref, facecolor='#fff3cd', alpha=0.3, zorder=0)
+
+# 5. Scatter Plot
+scatter = ax.scatter(
+    x=bubble_data['automa'], y=bubble_data['rsi'],
+    s=bubble_data['pot'] / bubble_data['pot'].max() * 3500,
+    c=bubble_data['rsi'], cmap='RdYlGn', alpha=0.7,
+    edgecolors='black', linewidth=0.8, zorder=3
 )
 
-# Líneas de referencia
-plt.axhline(1, color='red', linestyle='--', alpha=0.5) # Línea de no crecimiento
-plt.axvline(bubble_data['automa'].median(), color='blue', linestyle='--', alpha=0.5) # Mediana de automatización
+# 6. Etiquetas de Cuadrantes (Anotaciones)
+ax.text(0.98, 0.98, "ESTRATEGIA EXPANSIVA", transform=ax.transAxes, ha='right', va='top', fontsize=14, fontweight='black', alpha=0.2)
+ax.text(0.02, 0.98, "CRECIMIENTO TRADICIONAL", transform=ax.transAxes, ha='left', va='top', fontsize=14, fontweight='black', alpha=0.2)
+ax.text(0.02, 0.02, "SECTORES EN RIESGO", transform=ax.transAxes, ha='left', va='bottom', fontsize=14, fontweight='black', alpha=0.2)
+ax.text(0.98, 0.02, "EFICIENCIA DEFENSIVA", transform=ax.transAxes, ha='right', va='bottom', fontsize=14, fontweight='black', alpha=0.2)
 
-# Etiquetar los 8 sectores más automatizados o con más crecimiento
-top_labels = bubble_data.nlargest(8, 'automa')
-for i, row in top_labels.iterrows():
-    plt.text(row['automa'], row['rsi'], row['AE'], fontsize=9, fontweight='bold')
+# 7. Cuadro de Análisis de Correlación
+stats_text = (f"Correlación de Pearson: {corr_p:.3f} (p={p_val_p:.3f})\n"
+              f"Correlación de Spearman: {corr_s:.3f} (p={p_val_s:.3f})")
+# ax.text(0.02, 0.92, stats_text, transform=ax.transAxes, fontsize=11,
+#        bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray', boxstyle='round,pad=0.5'))
 
-plt.xscale('log') # Escala logarítmica para ver mejor la distribución
-plt.title('Grado de Automatización vs. Crecimiento Sectorial (2004-2023)', fontsize=16)
-plt.xlabel('Grado de Automatización (Activos / Personal Operativo) - Escala Log', fontsize=12)
-plt.ylabel('Crecimiento Nacional del Sector (rSi)', fontsize=12)
-plt.colorbar(label='Tasa de Crecimiento')
+# 8. Etiquetado y Ejes
+texts = []
+etiquetar = pd.concat([bubble_data.nlargest(5, 'pot'), bubble_data.nlargest(3, 'automa')]).drop_duplicates()
+for _, row in etiquetar.iterrows():
+    texts.append(ax.text(row['automa'], row['rsi'], row['AE'], fontsize=9, fontweight='bold',
+                         bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=0.5)))
+adjust_text(texts, ax=ax, arrowprops=dict(arrowstyle='->', color='black', lw=0.5))
 
+ax.set_xscale('log')
+ax.axhline(y_ref, color='black', lw=1.5, ls='-', alpha=0.5)
+ax.axvline(x_med, color='black', lw=1.5, ls='-', alpha=0.5)
+ax.set_xlim(x_lims)
+ax.set_ylim(y_lims)
+
+ax.set_title('Matriz de Transformación Tecnológica vs Crecimiento Sectorial', fontsize=18, fontweight='bold')
+ax.set_xlabel('Grado de Automatización (Eje Logarítmico)', fontsize=12)
+ax.set_ylabel('Tasa de Crecimiento del Sector (rSi)', fontsize=12)
+
+sns.despine()
+plt.tight_layout()
 plt.show()
-
-# Merge EDj and EEj from resumen_shift_share into the main DataFrame df
-# Note: EDj and EEj are calculated for the entire period (2003-2023), not year-specific.
-# When merged on 'NOMGEO', these values will be broadcasted across all years and sectors for each state.
-df = pd.merge(df, resumen_shift_share[['NOMGEO', 'EDj', 'EEj']], on='NOMGEO', how='left')
 
 """Guardado de procesos"""
 
 output_file_name = 'df_exportado.xlsx'
 df.to_excel(output_file_name, index=False)
 print(f"DataFrame guardado exitosamente como '{output_file_name}'")
-
-from google.colab import drive
-drive.mount('/content/drive')
 
 output_file_path = '/content/drive/MyDrive/df_exportado_drive.xlsx'
 df.to_excel(output_file_path, index=False)
