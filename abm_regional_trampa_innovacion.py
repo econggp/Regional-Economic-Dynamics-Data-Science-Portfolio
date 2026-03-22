@@ -668,11 +668,7 @@ class EcuacionesCalibradas:
     """
     Ecuaciones matemáticas calibradas con datos empíricos mexicanos (1995-2024).
     Optimizada para estabilidad numérica y facilidad de calibración.
-
-    Metadatos de Validación:
-    - R2 Histórico: 0.941
-    - Error Estándar: 0.032
-    - Cobertura: 3 ciclos económicos (1994, 2008, 2020)
+    Cobertura: 3 ciclos económicos (1994, 2008, 2020)
     """
 
     # ==========================================
@@ -749,7 +745,7 @@ class EcuacionesCalibradas:
 
         elas = EcuacionesCalibradas.ELASTICIDADES
 
-        # Cálculo Cobb-Douglas Vectorizado (más rápido que multiplicaciones encadenadas)
+        # Cálculo Cobb-Douglas Vectorizado 
         produccion_base = (
             np.power(inputs['K'], elas['capital']) *
             np.power(inputs['L'], elas['labor']) *
@@ -1016,9 +1012,6 @@ class EvaluacionDinamica:
 
         es_atrapada = "ATRAPADA" in estado_upper and "NO" not in estado_upper
 
-        # FIX 2: Activar la banda de transición para que EN_TRANSICION sea alcanzable.
-        # Antes: sólo existían 2 estados → el Enum EN_TRANSICION era letra muerta.
-        # Ahora: banda [0.45, 0.75] produce EN_TRANSICION; salida y caída requieren cruzar los extremos.
         BANDA_INFERIOR = EvaluacionDinamica.UMBRAL_CAIDA    # 0.45
         BANDA_SUPERIOR = EvaluacionDinamica.UMBRAL_SALIDA   # 0.75
 
@@ -2296,7 +2289,7 @@ class Region:
     def ejecutar_paso_simulacion(self, paso_tiempo: int, contexto_global: Dict[str, float]) -> Dict[str, Any]:
         """Ciclo principal de simulación."""
         self.paso_tiempo_actual = paso_tiempo
-        # FIX 5b: exponer ciclo_macro en la región para que Corporacion lo use
+        
         self._ciclo_macro_actual = contexto_global.get('ciclo_economico', 1.0)
 
         factor_ciclo = contexto_global.get('ciclo_economico', 1.0)
@@ -2307,8 +2300,6 @@ class Region:
         for fl in self.fuerzas_laborales.values():
             fl.gestionar_capacitacion(presupuesto_region / max(1, len(self.fuerzas_laborales)))
 
-        # Fix 7: Actualizar requisitos tecnológicos de cada FuerzaLaboral según avance de
-        # la corporación que opera en ese sector (skill-biased technical change)
         for corp in self.corporaciones:
             fl_sector = self.fuerzas_laborales.get(corp.tipo_sector)
             if fl_sector:
@@ -2386,7 +2377,7 @@ class Region:
 
         nuevo_estado_str = EvaluacionDinamica.determinar_estado_transicion(estado_previo_str, ise)
 
-        # FIX 3: Mapeo explícito de los 3 estados (alineado con FIX 2)
+        # Mapeo explícito de los 3 estados 
         if nuevo_estado_str == "No_Atrapada":
             self.tipo_region_economica_actual = TipoRegionEconomica.NO_ATRAPADA
         elif nuevo_estado_str == "Atrapada":
@@ -2396,7 +2387,7 @@ class Region:
         else:
             self.tipo_region_economica_actual = TipoRegionEconomica.ATRAPADA  # fallback seguro
 
-        # Fix 3: Recalibrar parámetros tipológicos tras cambio de estado económico.
+        # Recalibrar parámetros tipológicos tras cambio de estado económico.
         # Sin esto, una región que escapa de la trampa sigue con tasas de aprendizaje
         # y resiliencia de región atrapada, subestimando la velocidad de convergencia.
         if nuevo_estado_str != estado_previo_str:
@@ -2532,7 +2523,7 @@ def generar_metricas_integradas_region(region: 'Region') -> Dict[str, Any]:
         }
 
     # 5. VARIABLES DE ESTADO DIRECTAS (CRÍTICAS)
-    # Estas faltaban y son esenciales para series de tiempo
+
     metricas_estado = {
         'capacidad_tecnologica': region.capacidad_tecnologica,
         'tasa_innovacion': region.tasa_innovacion,
@@ -2700,8 +2691,7 @@ class ModeloEconomicoRegional:
         total_cambios = df_trans['cambio'].sum()
 
         # Detectar regiones milagro (Atrapada -> No_Atrapada)
-        # FIX 1: Usar == exacto — .contains('ATRAPADA') es substring de 'NO_ATRAPADA'
-        # y daba falsos positivos: regiones estables NO_ATRAPADA aparecían en ambas listas.
+      
         milagros = df_trans[
             (df_trans['Inicio'].str.upper() == 'ATRAPADA') &
             (df_trans['Fin'].str.upper() == 'NO_ATRAPADA')
@@ -3000,8 +2990,8 @@ def _graficar_comparativa_tipologias(df, save_path, colores):
 def _graficar_evolucion_temporal(df, save_path, colores):
     """2. Dinámica Temporal (Trayectorias de Convergencia/Divergencia)"""
 
-    col_tiempo = 'paso_tiempo'  # FIX 7: ambas ramas eran idénticas
-    col_tipo = 'tipo_region_economica_actual'  # FIX 7: ambas ramas eran idénticas
+    col_tiempo = 'paso_tiempo'  
+    col_tipo = 'tipo_region_economica_actual' 
 
     if col_tiempo not in df.columns: return
 
@@ -3044,7 +3034,7 @@ def _graficar_trampa_innovacion(df, save_path, colores):
     fig.suptitle('Diagnóstico de la trampa de innovación', fontsize=16, fontweight='bold')
 
     # Usamos solo el último paso para el diagnóstico final
-    col_tiempo = 'paso_tiempo'  # FIX 7: ambas ramas eran idénticas
+    col_tiempo = 'paso_tiempo'  
     ultimo_paso = df[col_tiempo].max()
     df_final = df[df[col_tiempo] == ultimo_paso].copy()
 
@@ -3080,7 +3070,7 @@ def _graficar_trampa_innovacion(df, save_path, colores):
                    s=100, alpha=0.7, edgecolors='w')
 
     ax2.set_xlabel('Tasa de innovación')
-    ax2.set_ylabel('PIB Regional')  # FIX 4: corregida etiqueta (antes: 'Productividad promedio')
+    ax2.set_ylabel('PIB Regional')  
     ax2.set_title('Eficiencia: Retorno de la innovación (PIB vs Innovación)')
     ax2.grid(True, alpha=0.3)
 
@@ -3093,7 +3083,7 @@ def _graficar_analisis_geografico(df, save_path, colores):
     if 'tipo_region' not in df.columns: return
 
     # Usar datos finales
-    col_tiempo = 'paso_tiempo'  # FIX 7: ambas ramas eran idénticas
+    col_tiempo = 'paso_tiempo'  
     df_final = df[df[col_tiempo] == df[col_tiempo].max()]
 
     fig, ax = plt.subplots(figsize=(14, 7))
@@ -3172,10 +3162,10 @@ def _graficar_dashboard_integral(df, df_final, save_path, colores):
 
 def _generar_resumen_estadistico(df, save_path):
     """Genera CSV con pruebas T de Student entre grupos."""
-    col_tipo = 'tipo_region_economica_actual'  # FIX 7: ambas ramas eran idénticas
+    col_tipo = 'tipo_region_economica_actual' 
 
     # Usar datos finales
-    col_tiempo = 'paso_tiempo'  # FIX 7: ambas ramas eran idénticas
+    col_tiempo = 'paso_tiempo' 
     df_final = df[df[col_tiempo] == df[col_tiempo].max()]
 
     cols_analisis = ['capacidad_tecnologica', 'pib_regional', 'tasa_innovacion', 'brecha_calificacion']
@@ -3265,7 +3255,7 @@ def crear_graficos_correlacion_optimizados(resultados: pd.DataFrame, save_path: 
     if len(vars_filt['Clave']) > 1:
         try:
             fig, ax = plt.subplots(figsize=(12, 10))
-            # BUG FIX: el parámetro del función se llama 'resultados', no 'df_resultados'
+            
             corr = resultados[vars_filt['Clave']].corr()
 
             if not corr.empty:
