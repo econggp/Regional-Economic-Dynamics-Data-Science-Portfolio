@@ -5,48 +5,27 @@
 # Autor: Gilberto González Pérez
 # =======================================================================
 
-# -----------------------------------------------------------------------
-# 0. PAQUETES
-# -----------------------------------------------------------------------
+pkgs <- c("tidyverse", "FactoMineR", "factoextra", "fpc", "mclust", "kernlab",
+          "sf", "spdep", "tmap", "ggalluvial", "trelliscopejs", "agricolae","mice",
+          "car", "MASS", "dunn.test", "pairwiseAdonis", "vegan", "ggcorrplot", "kableExtra",
+          "gridExtra", "e1071", "psych", "corrplot", "igraph", "diagram", "reshape2")
+suppressPackageStartupMessages(for (p in pkgs) {
+  if (!require(p, character.only = TRUE)) install.packages(p)
+  library(p, character.only = TRUE)
+})
 
-packages <- c(
-  # Manipulación y visualización
-  "tidyverse", "knitr", "reshape2", "scales", "viridis",
-  "ggpubr", "ggcorrplot", "gghighlight", "fmsb", "gridExtra",
-  "kableExtra", "ggalluvial", "ggstream","fGarch",
-  # Estadística descriptiva
-  "psych", "broom", "car", "corrr", "janitor", "skimr", "naniar",
-  # PCA y clustering
-  "FactoMineR", "factoextra", "NbClust", "cluster", "mclust",
-  "kernlab", "dbscan", "fpc", "agricolae", "dunn.test",
-  # Multivariado y espacial
-  "vegan", "MASS", "sf", "spdep", "tmap",
-  # Otros
-  "igraph", "treemapify", "highcharter", "trelliscopejs"
-)
-
-# Instalar los que falten y cargar todos
-installed <- rownames(installed.packages())
-to_install <- packages[!packages %in% installed]
-if (length(to_install) > 0) install.packages(to_install, dependencies = TRUE)
-
-suppressPackageStartupMessages(
-  invisible(lapply(packages, library, character.only = TRUE))
-)
-
-# pairwiseAdonis desde GitHub si no está instalado
-if (!requireNamespace("pairwiseAdonis", quietly = TRUE)) {
-  if (!requireNamespace("devtools", quietly = TRUE)) install.packages("devtools")
-  devtools::install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
-}
-library(pairwiseAdonis)
-
+set.seed(56) 
 
 # -----------------------------------------------------------------------
 # 1. CARGA Y PREPARACIÓN DE DATOS
 # -----------------------------------------------------------------------
 
-data <- bin   
+data <- bin 
+
+vars_interes <- c("iact","cdig", "ite", "intal", "Qs_pacd","marpacd", "marppvs",
+                  "eficap", "markup","automa", "ecos", "efene", "mbi","prod_cap", "prod_pacd",
+                  "prod_ppvs","ibl_pot", "compacd", "comppvs", "Qs_ppvs", "Qs_pot")
+
 
 data <- data %>% filter(!is.na(NOMGEO), !is.na(AE)) %>% na.omit()
 
@@ -55,9 +34,73 @@ cat("Años en la base:", sort(unique(data$tcode)), "\n")
 cat("Observaciones totales:", nrow(data), "\n")
 
 library(rpivotTable)
+
 tgen<- rpivotTable(data, rows="NOMGEO", col="AE", aggregatorName="Average", 
                    vals="compacd")
 tgen
+
+stats <- data %>%
+  dplyr::select(all_of(vars_interes)) %>%
+  summarise(across(everything(), list(
+    mean = ~mean(., na.rm = TRUE),
+    median = ~median(., na.rm = TRUE),
+    sd = ~sd(., na.rm = TRUE),
+    iqr = ~IQR(., na.rm = TRUE),
+    skew = ~skewness(., na.rm = TRUE)
+  ))) %>%
+  pivot_longer(everything(), 
+               names_to = c("variable", "stat"), 
+               names_pattern = "(.*)_(mean|median|sd|iqr|skew)") %>%
+  pivot_wider(names_from = stat, values_from = value)
+
+print(stats)
+
+data %>%
+  dplyr::select(all_of(vars_interes)) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
+  ggplot(aes(x = variable, y = value)) +
+  geom_boxplot(outlier.colour = "red", outlier.shape = 1) +
+  scale_y_log10() +   # ayuda a visualizar colas largas
+  labs(title = "Distribución de variables de capacidades",
+       subtitle = "Escala logarítmica en Y para resaltar outliers",
+       x = "Variable", y = "Valor (log10)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+data %>%
+  dplyr::select(all_of(vars_interes)) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 40, fill = "skyblue", color = "black", alpha = 0.7) +
+  geom_vline(data = . %>% group_by(variable) %>% summarise(mean = mean(value, na.rm = TRUE)),
+             aes(xintercept = mean), color = "red", linetype = "dashed", size = 1) +
+  geom_vline(data = . %>% group_by(variable) %>% summarise(median = median(value, na.rm = TRUE)),
+             aes(xintercept = median), color = "blue", linetype = "solid", size = 1) +
+  facet_wrap(~ variable, scales = "free") +
+  labs(title = "Histogramas con media (rojo) y mediana (azul)",
+       subtitle = "La separación indica asimetría y posible influencia de outliers") +
+  theme_minimal()
+
+stats_diff <- stats %>%
+  mutate(
+    mean_med_ratio = mean / median,
+    sd_iqr_ratio = sd / iqr
+  )
+
+ggplot(stats_diff, aes(x = reorder(variable, mean_med_ratio), y = mean_med_ratio)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Ratio media/mediana",
+       subtitle = "Valores > 1 indican asimetría positiva (cola derecha)",
+       x = "Variable", y = "Media / Mediana") +
+  theme_minimal()
+
+ggplot(stats_diff, aes(x = reorder(variable, sd_iqr_ratio), y = sd_iqr_ratio)) +
+  geom_col(fill = "darkgreen") +
+  coord_flip() +
+  labs(title = "Ratio desviación estándar / IQR",
+       subtitle = "Valores altos sugieren outliers que inflan la varianza",
+       x = "Variable", y = "SD / IQR") +
+  theme_minimal()
 
 # -----------------------------------------------------------------------
 # 2. ESTANDARIZACIÓN ROBUSTA
@@ -71,16 +114,18 @@ robust_scale <- function(x) {
   (x - median(x, na.rm = TRUE)) / iqr
 }
 
-data_std <- data %>%
-  mutate(across(automa:ptf & where(is.numeric), robust_scale))
+# Aplicar
+data_scaled <- data %>%
+  dplyr::select(all_of(vars_interes)) %>%
+  dplyr::mutate(dplyr::across(dplyr::everything(), robust_scale))
 
 # -----------------------------------------------------------------------
 # 3. ÍNDICES COMPUESTOS POR PCA (ICP, ICI, ICS)
 # -----------------------------------------------------------------------
-# Se ponderan los dos primeros componentes principales según su eigenvalor.
+# Se ponderan los tres primeros componentes principales según su eigenvalor.
 
-compute_pca_index <- function(data_std, variables, label) {
-  subset_data <- data_std[, variables]
+compute_pca_index <- function(data_scaled = data_scaled, variables, label) {
+  subset_data <- data_scaled[, variables]
   
   # Verificar varianza > 0 en todas las variables
   var_check <- sapply(subset_data, function(x) var(x, na.rm = TRUE))
@@ -92,14 +137,15 @@ compute_pca_index <- function(data_std, variables, label) {
   
   pca <- PCA(subset_data, graph = FALSE)
   
-  eig_vals <- pca$eig[1:2, "eigenvalue"]
+  eig_vals <- pca$eig[1:3, "eigenvalue"]
   w <- eig_vals / sum(eig_vals)
   
-  index <- as.numeric(w[1] * pca$ind$coord[, 1] + w[2] * pca$ind$coord[, 2])
+  index <- as.numeric(w[1] * pca$ind$coord[, 1] + w[2] * pca$ind$coord[, 2]+
+                        w[3] * pca$ind$coord[, 3])
   
   cat("\n--- PCA:", label, "---\n")
   print(get_eigenvalue(pca)[1:3, ])
-  cat("Ponderadores dim1/dim2:", round(w, 4), "\n")
+  cat("Ponderadores dim1/dim2/dim3:", round(w, 4), "\n")
   
   list(index = index, pca = pca, weights = w)
 }
@@ -121,12 +167,11 @@ compute_pca_index <- function(data_std, variables, label) {
 # =======================================================================
 
 # -----------------------------------------------------------------------
-# CONFIGURACIÓN GLOBAL
+# CONFIGURACIÓN INICIAL
 # -----------------------------------------------------------------------
+# dir.create("validacion_pca", showWarnings = FALSE)
 
-dir.create("validacion_pca", showWarnings = FALSE)
-
-# Función auxiliar: guardar ggplot
+# Función auxiliar para guardar ggplot
 guardar <- function(p, nombre, w = 8, h = 5) {
   ggsave(paste0("validacion_pca/", nombre, ".png"), p,
          width = w, height = h, dpi = 150)
@@ -134,9 +179,9 @@ guardar <- function(p, nombre, w = 8, h = 5) {
 }
 
 # Definición de variables por índice
-vars_icp <- c("automa", "ecpacd", "ecppvs", "eficap", "ite")
-vars_ici <- c("ecos",   "sact",   "efene",  "mbi",   "roa")
-vars_ics <- c("cdig",   "intal",  "iact",   "ibl_pacd", "ibl_ppvs")
+vars_icp <- c("automa", "iact", "markup")
+vars_ici <- c("ecos",   "efene", "mbi")
+vars_ics <- c("cdig",   "intal",  "ite")
 
 indices <- list(
   ICP = vars_icp,
@@ -145,19 +190,42 @@ indices <- list(
 )
 
 # -----------------------------------------------------------------------
-# FUNCIÓN MAESTRA DE VALIDACIÓN POR ÍNDICE
+# FUNCIÓN MAESTRA DE VALIDACIÓN POR ÍNDICE (OPTIMIZADA)
 # -----------------------------------------------------------------------
 
-validar_pca <- function(data_std, vars, label, n_comp = 2) {
+validar_pca <- function(data_scaled = data_scaled, vars, label, n_comp = 2) {
+  # Función auxiliar para guardar gráficos
+  guardar <- function(plot, nombre, width = 7, height = 5, dpi = 300) {
+    ggplot2::ggsave(filename = paste0(nombre, ".png"), plot = plot,
+                    width = width, height = height, dpi = dpi)
+  }
+  
+  # Validaciones iniciales
+  if (length(vars) < 2) {
+    stop("Se necesitan al menos 2 variables para realizar PCA.")
+  }
   
   cat("\n", strrep("=", 60), "\n")
   cat("  VALIDACIÓN PCA —", label, "\n")
   cat(strrep("=", 60), "\n\n")
   
-  # Subset limpio
-  df <- data_std[, vars] %>%
-    mutate(across(everything(), as.numeric)) %>%
-    filter(complete.cases(.))
+  # Subset de columnas
+  df <- data_scaled[, vars, drop = FALSE]
+  
+  # Convertir todas las columnas a numérico, tratando factores, caracteres y listas
+  df <- as.data.frame(lapply(df, function(x) {
+    # Si es factor, convertimos a character primero
+    if (is.factor(x)) x <- as.character(x)
+    # Intento de convertir a numérico; si falla, devolvemos NA
+    tryCatch(as.numeric(x), error = function(e) rep(NA_real_, length(x)))
+  }))
+  
+  # Eliminar filas con algún NA (valores no convertibles)
+  df <- df[stats::complete.cases(df), , drop = FALSE]
+  
+  if (nrow(df) == 0) {
+    stop("No hay observaciones completas después de convertir las variables a numérico.")
+  }
   
   n  <- nrow(df)
   p  <- ncol(df)
@@ -169,8 +237,11 @@ validar_pca <- function(data_std, vars, label, n_comp = 2) {
   if (n/p < 5)  warning("  ⚠  Ratio n/p < 5: muestra pequeña para PCA.")
   if (n < 50)   warning("  ⚠  n < 50: interpretación con cautela.")
   
-  # Alpha de Cronbach (cohesión interna de las variables del índice)
-  alpha_res <- tryCatch(psych::alpha(df)$total$raw_alpha, error = function(e) NA)
+  # Alpha de Cronbach
+  alpha_res <- tryCatch(
+    suppressWarnings(psych::alpha(df, check.keys = TRUE)$total$raw_alpha),
+    error = function(e) NA
+  )
   cat("   Alpha de Cronbach:", round(alpha_res, 3))
   if (!is.na(alpha_res)) {
     if (alpha_res >= 0.70) cat("  ✔  Aceptable (≥0.70)\n")
@@ -178,48 +249,40 @@ validar_pca <- function(data_std, vars, label, n_comp = 2) {
     else cat("  ✗  Bajo (<0.60): revisar composición del índice\n")
   } else cat("\n")
   
-  
-  # ── 1. SUPUESTO: CORRELACIONES ENTRE VARIABLES ────────────────────────
+  # ── 1. MATRIZ DE CORRELACIONES ────────────────────────────────────────
   cat("\n── 1. Matriz de correlaciones ──────────────────────────\n")
   R <- cor(mat, use = "complete.obs")
-  
-  # Determinante: cercano a 0 indica multicolinealidad alta (bueno para PCA)
   det_R <- det(R)
   cat("   Determinante |R|:", formatC(det_R, format = "e", digits = 4))
   if (det_R < 0.00001) cat("  ✔  Multicolinealidad suficiente para PCA\n")
   else if (det_R < 0.01) cat("  ✔  Correlaciones adecuadas\n")
   else cat("  ⚠  Correlaciones débiles: PCA puede no ser informativo\n")
   
-  # Visualización
-  p_corr <- ggcorrplot(R, hc.order = TRUE, type = "lower",
-                       lab = TRUE, lab_size = 3,
-                       colors = c("#C00000", "white", "#1F4E79"),
-                       title = paste("Matriz de correlaciones —", label)) +
-    theme(plot.title = element_text(face = "bold", size = 12))
-  guardar(p_corr, paste0("01_correlaciones_", label))
+  p_corr <- suppressWarnings(
+    ggcorrplot::ggcorrplot(R, hc.order = TRUE, type = "lower",
+                           lab = TRUE, lab_size = 3,
+                           colors = c("#C00000", "white", "#1F4E79"),
+                           title = paste("Matriz de correlaciones —", label)) +
+      ggplot2::theme(plot.title = ggplot2::element_text(face = "bold", size = 12))
+  )
+  guardar(p_corr, paste0("01_correlaciones_", label), width = 7, height = 7)
   
-  
-  # ── 2. SUPUESTO: PRUEBA DE BARTLETT ──────────────────────────────────
+  # ── 2. PRUEBA DE BARTLETT ────────────────────────────────────────────
   cat("\n── 2. Prueba de esfericidad de Bartlett ────────────────\n")
-  bartlett <- tryCatch({
-    psych::cortest.bartlett(R, n = n)
-  }, error = function(e) NULL)
-  
+  bartlett <- tryCatch(psych::cortest.bartlett(R, n = n), error = function(e) NULL)
   if (!is.null(bartlett)) {
     cat("   Chi-cuadrado:", round(bartlett$chisq, 2),
         "| gl:", bartlett$df,
         "| p-valor:", format(bartlett$p.value, scientific = TRUE), "\n")
     if (bartlett$p.value < 0.05)
-      cat("   ✔  Rechaza H0 (R = I): las variables están correlacionadas. PCA es apropiado.\n")
+      cat("   ✔  Rechaza H0 (R = I): las variables están correlacionadas.\n")
     else
       cat("   ✗  No rechaza H0: variables independientes. PCA no recomendado.\n")
   } else cat("   ⚠  No se pudo calcular Bartlett.\n")
   
-  
-  # ── 3. SUPUESTO: KMO ─────────────────────────────────────────────────
+  # ── 3. KMO ────────────────────────────────────────────────────────────
   cat("\n── 3. Índice KMO (Kaiser-Meyer-Olkin) ──────────────────\n")
   kmo_res <- tryCatch(psych::KMO(mat), error = function(e) NULL)
-  
   if (!is.null(kmo_res)) {
     kmo_global <- kmo_res$MSA
     cat("   KMO global:", round(kmo_global, 3))
@@ -236,7 +299,7 @@ validar_pca <- function(data_std, vars, label, n_comp = 2) {
     kmo_vars <- data.frame(
       Variable = names(kmo_res$MSAi),
       KMO      = round(kmo_res$MSAi, 3)
-    ) %>% mutate(Evaluacion = dplyr::case_when(
+    ) %>% dplyr::mutate(Evaluacion = dplyr::case_when(
       KMO >= 0.80 ~ "Muy bueno",
       KMO >= 0.70 ~ "Bueno",
       KMO >= 0.60 ~ "Mediocre",
@@ -250,53 +313,53 @@ validar_pca <- function(data_std, vars, label, n_comp = 2) {
       cat("\n   ⚠  Considerar eliminar:", paste(vars_problema, collapse = ", "), "\n")
   }
   
-  
   # ── 4. PCA ────────────────────────────────────────────────────────────
   cat("\n── 4. Ejecución del PCA ────────────────────────────────\n")
-  pca <- PCA(df, graph = FALSE)
-  
+  pca <- FactoMineR::PCA(df, graph = FALSE)
+  # Asegurar que n_comp no exceda el número de componentes disponibles
+  n_comp <- min(n_comp, ncol(pca$var$coord))
   
   # ── 5. EIGENVALORES Y VARIANZA EXPLICADA ──────────────────────────────
   cat("\n── 5. Eigenvalores y varianza explicada ────────────────\n")
-  # pca$eig es una matriz: columnas "eigenvalue", "percentage of variance",
-  # "cumulative percentage of variance". Usar [ ] — nunca $ en matrices.
-  eig_mat  <- pca$eig
+  eig_mat <- pca$eig
   print(round(eig_mat, 3))
   
-  n_kaiser <- sum(eig_mat[, "eigenvalue"] > 1)
+  n_kaiser <- sum(eig_mat[, 1] > 1)  # primera columna = eigenvalue
   cat("\n   Componentes con λ > 1 (criterio Kaiser):", n_kaiser, "\n")
   
-  var_acum <- eig_mat[n_comp, "cumulative percentage of variance"]
-  cat("   Varianza explicada por", n_comp, "componentes:", round(var_acum, 1), "%")
-  if (var_acum >= 60) cat("  ✔\n") else cat("  ⚠  Por debajo del 60% recomendado\n")
+  # Varianza acumulada para los primeros n_comp componentes
+  var_acum <- if (nrow(eig_mat) >= n_comp) eig_mat[n_comp, 3] else NA
+  if (!is.na(var_acum)) {
+    cat("   Varianza explicada por", n_comp, "componentes:", round(var_acum, 1), "%")
+    if (var_acum >= 60) cat("  ✔\n") else cat("  ⚠  Por debajo del 60% recomendado\n")
+  } else {
+    cat("   No hay suficientes componentes.\n")
+  }
   
   # Gráfico de sedimentación
-  p_scree <- fviz_eig(pca, addlabels = TRUE, ylim = c(0, 100),
-                      barfill = "#2E75B6", barcolor = "white",
-                      linecolor = "#C00000") +
-    geom_hline(yintercept = 100/p, linetype = "dashed",
-               color = "gray50", linewidth = 0.8) +
-    annotate("text", x = p - 0.5, y = 100/p + 1.5,
-             label = paste0("1/p = ", round(100/p, 1), "%"),
-             size = 3, color = "gray40") +
-    labs(title = paste("Gráfico de sedimentación —", label),
-         subtitle = paste0("Varianza acumulada (", n_comp, " comp.) = ",
-                           round(var_acum, 1), "%")) +
-    theme_minimal(base_size = 11)
+  p_scree <- factoextra::fviz_eig(pca, addlabels = TRUE, ylim = c(0, 100),
+                                  barfill = "#2E75B6", barcolor = "white",
+                                  linecolor = "#C00000") +
+    ggplot2::geom_hline(yintercept = 100/p, linetype = "dashed",
+                        color = "gray50", size = 0.8) +   # cambiado linewidth -> size
+    ggplot2::annotate("text", x = p - 0.5, y = 100/p + 1.5,
+                      label = paste0("1/p = ", round(100/p, 1), "%"),
+                      size = 3, color = "gray40") +
+    ggplot2::labs(title = paste("Gráfico de sedimentación —", label),
+                  subtitle = if (!is.na(var_acum)) paste0("Varianza acumulada (", n_comp, " comp.) = ", round(var_acum, 1), "%") else NULL) +
+    ggplot2::theme_minimal(base_size = 11)
   guardar(p_scree, paste0("02_sedimentacion_", label))
   
-  
-  # ── 6. CARGAS FACTORIALES (COORDENADAS) ───────────────────────────────
+  # ── 6. CARGAS FACTORIALES ─────────────────────────────────────────────
   cat("\n── 6. Cargas factoriales (coordenadas en componentes) ──\n")
-  coords <- as.data.frame(pca$var$coord[, 1:n_comp])
+  coords <- as.data.frame(pca$var$coord[, 1:n_comp, drop = FALSE])
   colnames(coords) <- paste0("Dim.", 1:n_comp)
   coords$Variable <- rownames(coords)
-  coords <- dplyr::select(coords, Variable, everything())
-  coords_print <- coords %>% mutate(across(where(is.numeric), ~ round(.x, 3)))
-  print(coords_print)
+  coords <- dplyr::select(coords, Variable, dplyr::everything())
+  print(coords %>% dplyr::mutate(dplyr::across(where(is.numeric), ~ round(.x, 3))))
   
-  # Variables con carga baja en ambos componentes (posible candidata a eliminar)
-  max_carga <- apply(abs(pca$var$coord[, 1:n_comp]), 1, max)
+  # Variables con carga baja en ambos componentes
+  max_carga <- apply(abs(pca$var$coord[, 1:n_comp, drop = FALSE]), 1, max)
   vars_baja_carga <- names(max_carga)[max_carga < 0.40]
   if (length(vars_baja_carga) > 0)
     cat("\n   ⚠  Carga < 0.40 en todos los componentes seleccionados:",
@@ -304,13 +367,12 @@ validar_pca <- function(data_std, vars, label, n_comp = 2) {
   else
     cat("\n   ✔  Todas las variables tienen carga ≥ 0.40 en al menos un componente\n")
   
-  
   # ── 7. COMUNALIDADES ──────────────────────────────────────────────────
   cat("\n── 7. Comunalidades (cos² acumulado en", n_comp, "comp.) ─\n")
-  cos2_acum <- rowSums(pca$var$cos2[, 1:n_comp])
+  cos2_acum <- rowSums(pca$var$cos2[, 1:n_comp, drop = FALSE])
   df_com <- data.frame(Variable = names(cos2_acum),
                        Comunalidad = round(cos2_acum, 3)) %>%
-    mutate(Evaluacion = dplyr::case_when(
+    dplyr::mutate(Evaluacion = dplyr::case_when(
       Comunalidad >= 0.70 ~ "✔  Bien representada",
       Comunalidad >= 0.50 ~ "⚠  Representación media",
       TRUE                ~ "✗  Mal representada"
@@ -322,35 +384,30 @@ validar_pca <- function(data_std, vars, label, n_comp = 2) {
     cat("\n   ⚠  Mal representadas (cos² <0.50):",
         paste(vars_mal_rep, collapse = ", "), "\n")
   
-  
   # ── 8. CONTRIBUCIONES ────────────────────────────────────────────────
   cat("\n── 8. Contribución de variables a cada componente ──────\n")
-  contrib <- as.data.frame(pca$var$contrib[, 1:n_comp])
+  umbral <- 100 / p
+  cat("   Umbral de contribución esperada (100/p):", round(umbral, 1), "%\n\n")
+  contrib <- as.data.frame(pca$var$contrib[, 1:n_comp, drop = FALSE])
   colnames(contrib) <- paste0("Contrib_Dim", 1:n_comp)
   contrib$Variable <- rownames(contrib)
-  umbral <- 100 / p   # umbral uniforme
-  cat("   Umbral de contribución esperada (100/p):", round(umbral, 1), "%\n\n")
-  contrib_print <- contrib %>% mutate(across(where(is.numeric), ~ round(.x, 2)))
-  print(contrib_print)
+  print(contrib %>% dplyr::mutate(dplyr::across(where(is.numeric), ~ round(.x, 2))))
   
-  # Gráfico de contribuciones
-  p_contrib1 <- fviz_contrib(pca, choice = "var", axes = 1, top = p,
-                             fill = "#2E75B6", color = "white") +
-    labs(title = paste(label, "— Contribuciones Dim.1")) +
-    theme_minimal(base_size = 10)
-  
-  p_contrib2 <- fviz_contrib(pca, choice = "var", axes = 2, top = p,
-                             fill = "#C55A11", color = "white") +
-    labs(title = paste(label, "— Contribuciones Dim.2")) +
-    theme_minimal(base_size = 10)
-  
+  # Gráficos de contribuciones
+  p_contrib1 <- factoextra::fviz_contrib(pca, choice = "var", axes = 1, top = p,
+                                         fill = "#2E75B6", color = "white") +
+    ggplot2::labs(title = paste(label, "— Contribuciones Dim.1")) +
+    ggplot2::theme_minimal(base_size = 10)
+  p_contrib2 <- factoextra::fviz_contrib(pca, choice = "var", axes = 2, top = p,
+                                         fill = "#C55A11", color = "white") +
+    ggplot2::labs(title = paste(label, "— Contribuciones Dim.2")) +
+    ggplot2::theme_minimal(base_size = 10)
   guardar(p_contrib1, paste0("03a_contribuciones_Dim1_", label))
   guardar(p_contrib2, paste0("03b_contribuciones_Dim2_", label))
   
-  
-  # ── 9. BIPLOT ──────────────────────────────────────────────────────────
+  # ── 9. BIPLOT ─────────────────────────────────────────────────────────
   cat("\n── 9. Biplot ────────────────────────────────────────────\n")
-  p_biplot <- fviz_pca_biplot(
+  p_biplot <- factoextra::fviz_pca_biplot(
     pca,
     col.var    = "#C00000",
     col.ind    = "cos2",
@@ -359,78 +416,67 @@ validar_pca <- function(data_std, vars, label, n_comp = 2) {
     label      = "var",
     alpha.ind  = 0.4,
     title      = paste("Biplot PCA —", label)
-  ) + theme_minimal(base_size = 10)
-  guardar(p_biplot, paste0("04_biplot_", label), w = 8, h = 7)
+  ) + ggplot2::theme_minimal(base_size = 10)
+  guardar(p_biplot, paste0("04_biplot_", label), width = 8, height = 7)
   
-  
-  # ── 10. ORTOGONALIDAD DE COMPONENTES ─────────────────────────────────
+  # ── 10. ORTOGONALIDAD DE COMPONENTES (por construcción es exacta) ────
   cat("\n── 10. Ortogonalidad de componentes ────────────────────\n")
-  scores      <- pca$ind$coord[, 1:n_comp]
-  cor_scores  <- cor(scores)
-  off_diag    <- cor_scores[upper.tri(cor_scores)]
-  max_corr    <- max(abs(off_diag))
-  cat("   Correlación máxima entre componentes:", round(max_corr, 4))
-  if (max_corr < 0.01)
-    cat("  ✔  Perfectamente ortogonales (esperado en PCA)\n")
-  else
-    cat("  ⚠  Componentes no completamente ortogonales\n")
-  
+  cat("   Por construcción, los componentes son ortogonales (correlación ~ 0).\n")
   
   # ── 11. PONDERADORES Y CONSTRUCCIÓN DEL ÍNDICE ────────────────────────
   cat("\n── 11. Ponderadores y construcción del índice ──────────\n")
-  eig_vals <- pca$eig[1:n_comp, "eigenvalue"]
-  w        <- eig_vals / sum(eig_vals)
+  eig_vals <- pca$eig[1:n_comp, 1]
+  w <- eig_vals / sum(eig_vals)
   cat("   Eigenvalores usados:", paste(round(eig_vals, 3), collapse = " | "), "\n")
   cat("   Ponderadores (w1, w2):", paste(round(w, 4), collapse = " | "), "\n")
   cat("   Suma ponderadores:", round(sum(w), 6), "  ✔\n")
   
-  index <- as.numeric(w[1] * pca$ind$coord[, 1] + w[2] * pca$ind$coord[, 2])
+  index <- as.numeric(w[1] * pca$ind$coord[, 1] +
+                        if (n_comp >= 2) w[2] * pca$ind$coord[, 2] else 0)
   
-  
-  # ── 12. DISTRIBUCIÓN DEL ÍNDICE ────────────────────────────────────────
+  # ── 12. DISTRIBUCIÓN DEL ÍNDICE ───────────────────────────────────────
   cat("\n── 12. Distribución del índice ─────────────────────────\n")
   cat("   Min:", round(min(index), 3), "| Mediana:", round(median(index), 3),
       "| Max:", round(max(index), 3), "| SD:", round(sd(index), 3), "\n")
   
-  # Test de normalidad (Shapiro en muestra aleatoria si n > 5000)
-  n_test  <- min(n, 4999)
+  # Test de normalidad (Shapiro con submuestra si n > 5000)
+  n_test <- min(n, 4999)
   set.seed(42)
   muestra <- sample(index, n_test)
-  sw      <- shapiro.test(muestra)
+  sw <- shapiro.test(muestra)
   cat("   Shapiro-Wilk (n=", n_test, "): W =", round(sw$statistic, 4),
       "| p =", format(sw$p.value, scientific = TRUE))
   if (sw$p.value > 0.05) cat("  ✔  No rechaza normalidad\n")
   else cat("  ⚠  Rechaza normalidad — usar interpretación no paramétrica\n")
   
-  p_hist <- ggplot(data.frame(idx = index), aes(idx)) +
-    geom_histogram(aes(y = after_stat(density)), bins = 40,
-                   fill = "#2E75B6", color = "white", alpha = 0.8) +
-    geom_density(color = "#C00000", linewidth = 1) +
-    geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
-    labs(title = paste("Distribución del índice", label),
-         x = label, y = "Densidad") +
-    theme_minimal(base_size = 11)
+  p_hist <- ggplot2::ggplot(data.frame(idx = index), ggplot2::aes(idx)) +
+    ggplot2::geom_histogram(ggplot2::aes(y = after_stat(density)), bins = 40,
+                            fill = "#2E75B6", color = "white", alpha = 0.8) +
+    ggplot2::geom_density(color = "#C00000", size = 1) +
+    ggplot2::geom_vline(xintercept = 0, linetype = "dashed", color = "gray50") +
+    ggplot2::labs(title = paste("Distribución del índice", label),
+                  x = label, y = "Densidad") +
+    ggplot2::theme_minimal(base_size = 11)
   guardar(p_hist, paste0("05_distribucion_", label))
   
-  
-  # ── 13. ESTABILIDAD BOOTSTRAP ─────────────────────────────────────────
+  # ── 13. ESTABILIDAD BOOTSTRAP (optimizado con prcomp) ─────────────────
   cat("\n── 13. Estabilidad bootstrap de cargas (B = 200) ───────\n")
   set.seed(56)
-  B       <- 200
-  n_boot  <- min(n, nrow(mat))
+  B <- 200
+  # Usamos prcomp para mayor velocidad
+  pca_orig <- prcomp(df, scale. = TRUE)  # estandarizado igual que PCA()
+  carga_orig <- pca_orig$rotation[, 1]
+  
   cargas_boot <- matrix(NA, nrow = B, ncol = p,
                         dimnames = list(NULL, vars))
   
   for (b in seq_len(B)) {
-    idx_b  <- sample(seq_len(n_boot), n_boot, replace = TRUE)
-    pca_b  <- tryCatch(
-      PCA(as.data.frame(mat[idx_b, ]), graph = FALSE),
-      error = function(e) NULL
-    )
+    idx_b <- sample(n, n, replace = TRUE)
+    boot_sample <- df[idx_b, , drop = FALSE]
+    pca_b <- tryCatch(prcomp(boot_sample, scale. = TRUE), error = function(e) NULL)
     if (!is.null(pca_b)) {
-      # Alinear signo: correlacionar con primera carga original
-      carga_orig <- pca$var$coord[, 1]
-      carga_b    <- pca_b$var$coord[, 1]
+      carga_b <- pca_b$rotation[, 1]
+      # Alinear signo
       if (cor(carga_orig, carga_b) < 0) carga_b <- -carga_b
       cargas_boot[b, ] <- carga_b
     }
@@ -442,10 +488,10 @@ validar_pca <- function(data_std, vars, label, n_comp = 2) {
     Carga_PCA = round(pca$var$coord[, 1], 3),
     Media_Boot = round(colMeans(cargas_boot), 3),
     SD_Boot    = round(apply(cargas_boot, 2, sd), 3),
-    IC_Bajo    = round(apply(cargas_boot, 2, quantile, 0.025), 3),
-    IC_Alto    = round(apply(cargas_boot, 2, quantile, 0.975), 3)
+    IC_Bajo    = round(apply(cargas_boot, 2, quantile, 0.025, na.rm = TRUE), 3),
+    IC_Alto    = round(apply(cargas_boot, 2, quantile, 0.975, na.rm = TRUE), 3)
   ) %>%
-    mutate(Estable = IC_Bajo * IC_Alto > 0)   # IC no cruza cero → estable
+    dplyr::mutate(Estable = IC_Bajo * IC_Alto > 0)
   
   print(boot_summary)
   inestables <- boot_summary$Variable[!boot_summary$Estable]
@@ -455,30 +501,28 @@ validar_pca <- function(data_std, vars, label, n_comp = 2) {
   else
     cat("\n   ✔  Todas las cargas son estables (IC no cruza cero)\n")
   
-  # Gráfico de intervalos bootstrap
-  p_boot <- ggplot(boot_summary, aes(x = reorder(Variable, Carga_PCA),
-                                     y = Carga_PCA, color = Estable)) +
-    geom_point(size = 3) +
-    geom_errorbar(aes(ymin = IC_Bajo, ymax = IC_Alto), width = 0.3) +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
-    scale_color_manual(values = c("TRUE" = "#375623", "FALSE" = "#C00000"),
-                       labels = c("TRUE" = "Estable", "FALSE" = "Inestable")) +
-    coord_flip() +
-    labs(title = paste("Estabilidad bootstrap de cargas Dim.1 —", label),
-         subtitle = "Intervalos de confianza al 95% (B = 200)",
-         x = "", y = "Carga factorial", color = "") +
-    theme_minimal(base_size = 11)
+  p_boot <- ggplot2::ggplot(boot_summary, ggplot2::aes(x = reorder(Variable, Carga_PCA),
+                                                       y = Carga_PCA, color = Estable)) +
+    ggplot2::geom_point(size = 3) +
+    ggplot2::geom_errorbar(ggplot2::aes(ymin = IC_Bajo, ymax = IC_Alto), width = 0.3) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+    ggplot2::scale_color_manual(values = c("TRUE" = "#375623", "FALSE" = "#C00000"),
+                                labels = c("TRUE" = "Estable", "FALSE" = "Inestable")) +
+    ggplot2::coord_flip() +
+    ggplot2::labs(title = paste("Estabilidad bootstrap de cargas Dim.1 —", label),
+                  subtitle = "Intervalos de confianza al 95% (B = 200)",
+                  x = "", y = "Carga factorial", color = "") +
+    ggplot2::theme_minimal(base_size = 11)
   guardar(p_boot, paste0("06_bootstrap_", label))
   
-  
-  # ── RESULTADO FINAL ────────────────────────────────────────────────────
+  # ── RESUMEN ───────────────────────────────────────────────────────────
   cat("\n── RESUMEN ─────────────────────────────────────────────\n")
   puntos_ok <- c(
-    bartlett$p.value < 0.05,
-    !is.na(kmo_global) && kmo_global >= 0.60,
-    var_acum >= 60,
-    all(cos2_acum >= 0.50),
-    all(boot_summary$Estable)
+    !is.null(bartlett) && bartlett$p.value < 0.05,
+    !is.null(kmo_res) && kmo_global >= 0.60,
+    !is.na(var_acum) && var_acum >= 60,
+    all(cos2_acum >= 0.50, na.rm = TRUE),
+    all(boot_summary$Estable, na.rm = TRUE)
   )
   criterios <- c("Bartlett p<0.05", "KMO≥0.60",
                  "Varianza≥60%", "Comunalidades≥0.50", "Bootstrap estable")
@@ -493,12 +537,12 @@ validar_pca <- function(data_std, vars, label, n_comp = 2) {
   else
     cat("  → REVISAR EL PCA: múltiples criterios fallidos ✗\n")
   
-  # Devolver objetos útiles
+  # Resultado invisible
   invisible(list(
     label       = label,
     pca         = pca,
     index       = index,
-    kmo         = kmo_global,
+    kmo         = if (!is.null(kmo_res)) kmo_global else NA,
     bartlett    = bartlett,
     varianza    = var_acum,
     comunalidades = cos2_acum,
@@ -508,459 +552,115 @@ validar_pca <- function(data_std, vars, label, n_comp = 2) {
   ))
 }
 
-
 # -----------------------------------------------------------------------
 # EJECUTAR VALIDACIÓN PARA LOS TRES ÍNDICES
 # -----------------------------------------------------------------------
+# Asegurar que data_std existe en el entorno (debes haberla creado antes)
 
 resultados_val <- lapply(names(indices), function(lbl) {
-  validar_pca(data_std, vars = indices[[lbl]], label = lbl, n_comp = 2)
+  validar_pca(data_scaled = data_scaled , vars = indices[[lbl]], label = lbl, n_comp = 2)
 })
 names(resultados_val) <- names(indices)
 
-# =======================================================================
-# DIAGNÓSTICO Y MEJORA DE LOS ÍNDICES ICP / ICI / ICS
-# =======================================================================
-# Organización:
-#   NIVEL 1 — Correcciones inmediatas (Alpha, variables problemáticas)
-#   NIVEL 2 — Reestructuración de los índices (análisis paralelo, rotación)
-#   NIVEL 3 — Alternativas al PCA exploratorio
-# =======================================================================
+# 1. Extraer índices en un solo data frame ---------------------------------
 
-dir.create("mejora_pca", showWarnings = FALSE)
+ids <- if (!is.null(rownames(data_scaled))) rownames(data_scaled) else 1:nrow(data_scaled)
 
-guardar <- function(p, nombre, w = 8, h = 5)
-  ggsave(paste0("mejora_pca/", nombre, ".png"), p, width = w, height = h, dpi = 150)
-
-# -----------------------------------------------------------------------
-# DEFINICIÓN ORIGINAL
-# -----------------------------------------------------------------------
-vars_icp_orig <- c("automa", "ecpacd", "ecppvs", "eficap", "ite")
-vars_ici_orig <- c("ecos",   "sact",   "efene",  "mbi",   "roa")
-vars_ics_orig <- c("cdig",   "intal",  "iact",   "ibl_pacd", "ibl_ppvs")
-
-todas_vars <- c(vars_icp_orig, vars_ici_orig, vars_ics_orig)
-
-
-# =======================================================================
-# NIVEL 1 — CORRECCIONES INMEDIATAS
-# =======================================================================
-
-cat("\n", strrep("═", 60), "\n")
-cat("  NIVEL 1 — CORRECCIONES INMEDIATAS\n")
-cat(strrep("═", 60), "\n")
-
-
-# ── 1A. Alpha de Cronbach CORRECTO (check.keys = TRUE) ────────────────
-
-cat("\n── 1A. Alpha de Cronbach con check.keys = TRUE ─────────\n")
-
-alpha_correcto <- function(df_vars, label) {
-  df <- data_std[, df_vars]
-  res <- psych::alpha(df, check.keys = TRUE)
-  a   <- res$total$raw_alpha
-  cat(sprintf("  %-5s → Alpha = %.3f", label, a))
-  if      (a >= 0.70) cat("  ✔  Aceptable\n")
-  else if (a >= 0.60) cat("  ⚠  Marginal\n")
-  else                cat("  ✗  Bajo — las variables no forman una escala coherente\n")
-  invisible(res)
-}
-
-alpha_correcto(vars_icp_orig, "ICP")
-alpha_correcto(vars_ici_orig, "ICI")
-alpha_correcto(vars_ics_orig, "ICS")
-
-# ── 1B. Correlaciones internas detalladas ─────────────────────────────
-# Permite ver exactamente qué pares de variables "tiran" en sentidos distintos.
-
-cat("\n── 1B. Diagnóstico de correlaciones internas ───────────\n")
-
-diagnostico_correlaciones <- function(df_vars, label) {
-  df  <- data_std[, df_vars]
-  R   <- cor(df, use = "complete.obs")
-  det <- det(R)
-  
-  # Pares con correlación negativa fuerte (|r| > 0.20 y negativa)
-  pares_neg <- which(R < -0.20 & lower.tri(R), arr.ind = TRUE)
-  
-  cat("\n  Índice:", label,
-      "| Determinante:", round(det, 4),
-      "| Correlación media:", round(mean(abs(R[lower.tri(R)])), 3), "\n")
-  
-  if (nrow(pares_neg) > 0) {
-    cat("  ⚠  Pares con correlación negativa (|r|>0.20):\n")
-    for (i in seq_len(nrow(pares_neg))) {
-      r1 <- rownames(R)[pares_neg[i, 1]]
-      r2 <- colnames(R)[pares_neg[i, 2]]
-      cat(sprintf("     %s ↔ %s : r = %.3f\n", r1, r2, R[r1, r2]))
-    }
-  } else {
-    cat("  ✔  Sin correlaciones negativas fuertes\n")
-  }
-  
-  p <- ggcorrplot(R, hc.order = TRUE, type = "lower", lab = TRUE,
-                  lab_size = 3.5,
-                  colors = c("#C00000", "white", "#1F4E79"),
-                  title = paste("Correlaciones internas —", label))
-  guardar(p, paste0("1b_corr_", label))
-}
-
-diagnostico_correlaciones(vars_icp_orig, "ICP")
-diagnostico_correlaciones(vars_ici_orig, "ICI")
-diagnostico_correlaciones(vars_ics_orig, "ICS")
-
-
-# ── 1C. Eliminar variables KMO < 0.50 y re-evaluar ───────────────────
-# Basado en los resultados de la validación:
-#   ICP: eliminar ecpacd, eficap (KMO < 0.50)
-#   ICI: eliminar roa (KMO < 0.50)
-#   ICS: eliminar cdig, intal, ibl_pacd, ibl_ppvs (KMO < 0.50)
-#        OJO: eliminar ibl_pacd e ibl_ppvs deja ICS con muy pocas vars
-#        → solo eliminar intal (KMO = 0.269, la más baja)
-
-cat("\n── 1C. KMO post-eliminación de variables problemáticas ─\n")
-
-vars_icp_v2 <- c("automa", "ecppvs", "ite")          # eliminados: ecpacd, eficap
-vars_ici_v2 <- c("ecos", "sact", "efene", "mbi")     # eliminado: roa
-vars_ics_v2 <- c("cdig", "iact", "ibl_pacd", "ibl_ppvs")  # eliminado: intal
-
-re_kmo <- function(df_vars, label) {
-  df  <- data_std[, df_vars]
-  kmo <- psych::KMO(as.matrix(df))
-  cat(sprintf("  %-8s → KMO global: %.3f  (variables: %s)\n",
-              label, kmo$MSA, paste(df_vars, collapse = ", ")))
-  kmo
-}
-
-cat("\n  Versiones reducidas:\n")
-re_kmo(vars_icp_v2, "ICP_v2")
-re_kmo(vars_ici_v2, "ICI_v2")
-re_kmo(vars_ics_v2, "ICS_v2")
-
-
-# =======================================================================
-# NIVEL 2 — REESTRUCTURACIÓN DE LOS ÍNDICES
-# =======================================================================
-
-cat("\n\n", strrep("═", 60), "\n")
-cat("  NIVEL 2 — REESTRUCTURACIÓN\n")
-cat(strrep("═", 60), "\n")
-
-
-# ── 2A. Análisis paralelo (determinar número real de factores) ─────────
-# El análisis paralelo compara los eigenvalores observados con los
-# esperados bajo datos aleatorios. Es más fiable que el criterio Kaiser.
-
-cat("\n── 2A. Análisis paralelo por índice ────────────────────\n")
-
-paralelo <- function(df_vars, label) {
-  df  <- data_std[, df_vars]
-  cat("\n  Análisis paralelo —", label, "\n")
-  # fa.parallel: usa tanto PCA como FA para determinar n de factores/componentes
-  ap <- psych::fa.parallel(df, fa = "pc", plot = FALSE, n.iter = 200,
-                           sim = TRUE, error.bars = FALSE,
-                           fm = "ml", main = paste("Paralelo", label))
-  cat("  → Número sugerido de componentes PCA:", ap$ncomp, "\n")
-  cat("  → Número sugerido de factores  FA:  ", ap$nfact, "\n")
-  invisible(ap)
-}
-
-ap_icp <- paralelo(vars_icp_orig, "ICP")
-ap_ici <- paralelo(vars_ici_orig, "ICI")
-ap_ics <- paralelo(vars_ics_orig, "ICS")
-
-
-# ── 2B. PCA con rotación Varimax ──────────────────────────────────────
-# Cuando hay más de un componente, Varimax mejora la interpretabilidad
-# al maximizar la varianza de las cargas al cuadrado → cargas más claras.
-# Usar cuando el análisis paralelo sugiere ≥ 2 componentes.
-
-cat("\n── 2B. PCA con rotación Varimax ────────────────────────\n")
-
-pca_varimax <- function(df_vars, label, n_comp = 2) {
-  df  <- data_std[, df_vars]
-  mat <- as.matrix(df)
-  
-  # PCA base
-  pca <- prcomp(mat, scale. = TRUE)
-  
-  # Rotación Varimax sobre los primeros n_comp componentes
-  rot <- varimax(pca$rotation[, 1:n_comp])
-  
-  cargas_rot <- as.data.frame(rot$loadings[, 1:n_comp])
-  colnames(cargas_rot) <- paste0("Factor", 1:n_comp)
-  cargas_rot$Variable <- rownames(cargas_rot)
-  
-  cat("\n  Cargas rotadas (Varimax) —", label, "\n")
-  print(cargas_rot %>%
-          mutate(across(where(is.numeric), ~ round(.x, 3))) %>%
-          dplyr::select(Variable, everything()))
-  
-  # Varianza explicada por cada factor rotado
-  var_exp <- colSums(rot$loadings^2) / nrow(rot$loadings) * 100
-  cat("  Varianza por factor rotado:", paste(round(var_exp, 1), collapse = "% | "), "%\n")
-  
-  invisible(list(pca = pca, rot = rot, cargas = cargas_rot))
-}
-
-rot_icp <- pca_varimax(vars_icp_orig, "ICP", n_comp = 2)
-rot_ici <- pca_varimax(vars_ici_orig, "ICI", n_comp = 2)
-rot_ics <- pca_varimax(vars_ics_orig, "ICS", n_comp = 2)
-
-
-# ── 2C. PCA global sobre las 15 variables ────────────────────────────
-# Si las variables originales no se agrupan limpiamente en 3 índices,
-# el PCA global revela la estructura factorial real de los datos.
-# Esto puede sugerir una reasignación de variables a índices.
-
-cat("\n── 2C. PCA global — estructura factorial real ──────────\n")
-
-df_global <- data_std[, todas_vars]
-pca_global <- PCA(df_global, graph = FALSE)
-
-cat("\n  Eigenvalores globales:\n")
-print(round(pca_global$eig[pca_global$eig[, "eigenvalue"] > 1, ], 3))
-
-cat("\n  Análisis paralelo global:\n")
-ap_global <- psych::fa.parallel(df_global, fa = "pc", plot = FALSE,
-                                n.iter = 200, sim = TRUE)
-cat("  → Componentes sugeridos:", ap_global$ncomp, "\n")
-cat("  → Factores sugeridos:   ", ap_global$nfact, "\n")
-
-# Cargas en los primeros 3-4 componentes globales
-n_glob <- min(ap_global$ncomp, 4)
-cargas_glob <- as.data.frame(pca_global$var$coord[, 1:n_glob])
-colnames(cargas_glob) <- paste0("G", 1:n_glob)
-cargas_glob$Variable <- rownames(cargas_glob)
-cargas_glob$Indice_orig <- case_when(
-  cargas_glob$Variable %in% vars_icp_orig ~ "ICP",
-  cargas_glob$Variable %in% vars_ici_orig ~ "ICI",
-  TRUE ~ "ICS"
+indices_df <- data.frame(
+  id = ids,
+  ICP = resultados_val$ICP$index,
+  ICI = resultados_val$ICI$index,
+  ICS = resultados_val$ICS$index
 )
 
-cat("\n  Cargas globales (primeros", n_glob, "componentes):\n")
-print(cargas_glob %>%
-        mutate(across(where(is.numeric), ~ round(.x, 3))) %>%
-        dplyr::select(Indice_orig, Variable, everything()) %>%
-        arrange(Indice_orig))
+write.csv(indices_df, "indices_pca.csv", row.names = FALSE)
 
-# Heatmap de cargas globales
-cargas_long <- cargas_glob %>%
-  pivot_longer(cols = starts_with("G"),
-               names_to = "Componente", values_to = "Carga")
-
-p_cargas_glob <- ggplot(cargas_long,
-                        aes(x = Componente, y = Variable, fill = Carga)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = round(Carga, 2)), size = 3) +
-  scale_fill_gradient2(low = "#C00000", mid = "white", high = "#1F4E79",
-                       midpoint = 0, limits = c(-1, 1)) +
-  facet_grid(Indice_orig ~ ., scales = "free_y", space = "free") +
-  labs(title = "Cargas en PCA global (15 variables)",
-       subtitle = "Agrupación original resaltada por faceta",
-       x = "Componente global", y = "") +
-  theme_minimal(base_size = 10) +
-  theme(strip.text.y = element_text(angle = 0, face = "bold"))
-
-p_cargas_glob
-
-guardar(p_cargas_glob, "2c_cargas_pca_global", w = 7, h = 8)
-
-cat("\n  → Si variables de índices distintos cargan en el mismo componente,\n")
-cat("    la agrupación teórica no coincide con la estructura empírica.\n")
-cat("    Ver: mejora_pca/2c_cargas_pca_global.png\n")
-
-
-# =======================================================================
-# NIVEL 3 — ALTERNATIVAS AL PCA EXPLORATORIO
-# =======================================================================
-
-cat("\n\n", strrep("═", 60), "\n")
-cat("  NIVEL 3 — ALTERNATIVAS AL PCA EXPLORATORIO\n")
-cat(strrep("═", 60), "\n")
-
-
-# ── 3A. Índice por media ponderada por correlación (sin PCA) ──────────
-# Cuando las variables no comparten un factor latente fuerte, una
-# alternativa robusta es ponderar cada variable por su correlación
-# promedio con las demás dentro del índice.
-# Esta ponderación tiene justificación teórica (mayor coherencia interna
-# → mayor peso) y no depende de supuestos del PCA.
-
-cat("\n── 3A. Índice ponderado por correlación media ──────────\n")
-
-indice_pond_corr <- function(df_vars, label) {
-  df   <- data_std[, df_vars]
-  R    <- cor(df, use = "complete.obs")
+# 2. Guardar cargas (loadings) de cada componente -------------------------
+for (lbl in names(resultados_val)) {
+  # Cargas factoriales (coordenadas de las variables)
+  loadings <- as.data.frame(resultados_val[[lbl]]$pca$var$coord)
+  loadings$variable <- rownames(loadings)
+  write.csv(loadings, paste0("validacion_pca/cargas_", lbl, ".csv"), row.names = FALSE)
   
-  # Correlación media de cada variable con las demás (sin contar consigo misma)
-  cor_media <- (colSums(abs(R)) - 1) / (ncol(R) - 1)
-  w_corr    <- cor_media / sum(cor_media)
-  
-  cat(sprintf("\n  Ponderadores por correlación media — %s:\n", label))
-  df_w <- data.frame(Variable = names(w_corr),
-                     Cor_media = round(cor_media, 3),
-                     Peso = round(w_corr, 3))
-  print(df_w)
-  
-  index <- as.numeric(as.matrix(df) %*% w_corr)
-  cat("  → Índice: Min =", round(min(index), 2),
-      "| Mediana =", round(median(index), 2),
-      "| Max =", round(max(index), 2), "\n")
-  
-  list(index = index, pesos = w_corr, df_pesos = df_w)
-}
-
-ind_icp_corr <- indice_pond_corr(vars_icp_orig, "ICP")
-ind_ici_corr <- indice_pond_corr(vars_ici_orig, "ICI")
-ind_ics_corr <- indice_pond_corr(vars_ics_orig, "ICS")
-
-
-# ── 3B. Análisis Factorial Confirmatorio (AFC) ────────────────────────
-# Si la agrupación de variables en ICP/ICI/ICS tiene respaldo teórico
-# sólido, el AFC prueba si el modelo de medida es consistente con datos.
-# Requiere el paquete lavaan.
-
-cat("\n── 3B. Análisis Factorial Confirmatorio (AFC) ──────────\n")
-
-if (!requireNamespace("lavaan", quietly = TRUE)) install.packages("lavaan")
-library(lavaan)
-
-# Modelo teórico: cada índice es un factor latente
-modelo_cfa <- "
-  ICP =~ automa + ecpacd + ecppvs + eficap + ite
-  ICI =~ ecos   + sact   + efene  + mbi    + roa
-  ICS =~ cdig   + intal  + iact   + ibl_pacd + ibl_ppvs
-"
-
-df_cfa <- as.data.frame(data_std[, todas_vars])
-
-fit_cfa <- tryCatch(
-  lavaan::cfa(modelo_cfa, data = df_cfa,
-              estimator = "MLR",      # robusto a no normalidad
-              std.lv = TRUE),
-  error = function(e) { cat("  ✗ AFC no convergió:", e$message, "\n"); NULL }
-)
-
-if (!is.null(fit_cfa)) {
-  fit_idx <- lavaan::fitMeasures(fit_cfa,
-                                 c("chisq", "df", "pvalue", "cfi", "tli", "rmsea", "srmr"))
-  
-  cat("\n  Índices de ajuste del AFC:\n")
-  cat(sprintf("  Chi²(df=%g) = %.1f  p = %.4f\n",
-              fit_idx["df"], fit_idx["chisq"], fit_idx["pvalue"]))
-  cat(sprintf("  CFI = %.3f  (≥0.95 = buen ajuste)\n",  fit_idx["cfi"]))
-  cat(sprintf("  TLI = %.3f  (≥0.95 = buen ajuste)\n",  fit_idx["tli"]))
-  cat(sprintf("  RMSEA = %.3f  (≤0.06 = buen ajuste)\n", fit_idx["rmsea"]))
-  cat(sprintf("  SRMR  = %.3f  (≤0.08 = buen ajuste)\n", fit_idx["srmr"]))
-  
-  if (fit_idx["cfi"] >= 0.95 && fit_idx["rmsea"] <= 0.06) {
-    cat("\n  ✔  El modelo AFC ajusta bien — la agrupación teórica es válida.\n")
-    cat("     Recomendación: usar las cargas del AFC como ponderadores.\n")
-  } else {
-    cat("\n  ✗  El modelo AFC NO ajusta bien.\n")
-    cat("     Implicación: la agrupación teórica no está respaldada por los datos.\n")
-    cat("     → Solicitar índices de modificación para reasignar variables.\n")
-    
-    # Índices de modificación (sugerencias de reasignación)
-    mi <- lavaan::modindices(fit_cfa, sort = TRUE, maximum.number = 10)
-    cat("\n  Top 10 índices de modificación (reasignaciones sugeridas):\n")
-    print(mi[mi$op == "=~", c("lhs", "op", "rhs", "mi", "epc")])
-  }
-  
-  # Cargas estandarizadas del AFC
-  cat("\n  Cargas estandarizadas del AFC:\n")
-  cargas_afc <- lavaan::standardizedSolution(fit_cfa) %>%
-    filter(op == "=~") %>%
-    dplyr::select(Factor = lhs, Variable = rhs,
-                  Carga = est.std, SE = se, pvalue)
-  print(cargas_afc %>% mutate(across(where(is.numeric), ~ round(.x, 3))))
-}
-
-
-# ── 3C. Comparación de índices: PCA vs Correlación vs AFC ─────────────
-
-cat("\n── 3C. Correlación entre métodos de construcción ───────\n")
-
-# PCA 
-robust_scale <- function(x) {
-  iqr <- IQR(x, na.rm = TRUE)
-  if (iqr == 0) return(rep(0, length(x)))
-  (x - median(x, na.rm = TRUE)) / iqr
-}
-
-# Función PCA estándar
-pca_index <- function(df_vars) {
-  df  <- data_std[, df_vars]
-  pca <- PCA(df, graph = FALSE)
-  w   <- pca$eig[1:2, "eigenvalue"] / sum(pca$eig[1:2, "eigenvalue"])
-  as.numeric(w[1] * pca$ind$coord[, 1] + w[2] * pca$ind$coord[, 2])
-}
-
-icp_pca  <- pca_index(vars_icp_orig)
-ici_pca  <- pca_index(vars_ici_orig)
-ics_pca  <- pca_index(vars_ics_orig)
-
-icp_corr <- ind_icp_corr$index
-ici_corr <- ind_ici_corr$index
-ics_corr <- ind_ics_corr$index
-
-comparacion <- data.frame(
-  Indice  = c("ICP", "ICI", "ICS"),
-  r_PCA_Corr = c(
-    round(cor(icp_pca, icp_corr), 3),
-    round(cor(ici_pca, ici_corr), 3),
-    round(cor(ics_pca, ics_corr), 3)
+  # Comunalidades (cos² acumulado)
+  comunalidades <- data.frame(
+    variable = names(resultados_val[[lbl]]$comunalidades),
+    comunalidad = resultados_val[[lbl]]$comunalidades
   )
+  write.csv(comunalidades, paste0("validacion_pca/comunalidades_", lbl, ".csv"), row.names = FALSE)
+  
+  # Resumen de bootstrap
+  boot <- resultados_val[[lbl]]$boot_summary
+  write.csv(boot, paste0("validacion_pca/bootstrap_", lbl, ".csv"), row.names = FALSE)
+}
+
+# 3. (Opcional) Guardar resumen de criterios y varianza explicada ---------
+resumen_criterios <- data.frame(
+  indice = names(resultados_val),
+  kmo = sapply(resultados_val, function(x) x$kmo),
+  varianza_acum = sapply(resultados_val, function(x) x$varianza),
+  bartlett_p = sapply(resultados_val, function(x) if(!is.null(x$bartlett)) x$bartlett$p.value else NA),
+  criterios_ok = sapply(resultados_val, function(x) sum(x$criterios_ok))
 )
 
-cat("\n  Correlación entre índice por PCA y por ponderación de correlación:\n")
-print(comparacion)
-cat("\n  Si r > 0.90: los dos métodos son equivalentes → usar el más simple.\n")
-cat("  Si r < 0.70: los métodos divergen → revisar cuál tiene mejor\n")
-cat("               respaldo teórico y estadístico.\n")
-
+write.csv(resumen_criterios, "resumen_criterios_robpca.csv", row.names = FALSE)
 
 # -----------------------------------------------------------------------
 # 4. PREPARACIÓN DE BASE PARA CLUSTERING
 # -----------------------------------------------------------------------
-# Reestructuración de variables por índice
 
-vars_icp <- c("automa", "iact", "ibl_pot")
-vars_ici <- c("ecos", "efene", "mbi" )
-vars_ics <- c("cdig", "intal", "ite")
+res_icp  <- compute_pca_index(data_scaled, vars_icp, "ICP")
+data$ICP <- res_icp$index
+data_scaled$ICP <- res_icp$index
 
-indices <- list(
-  ICP = vars_icp,
-  ICI = vars_ici,
-  ICS = vars_ics
-)
+res_ici  <- compute_pca_index(data_scaled, vars_ici, "ICI")
+data$ICI <- res_ici$index
+data_scaled$ICI <- res_ici$index
 
-res_icp  <- compute_pca_index(data_std, vars_icp, "ICP")
-data_std$ICP <- res_icp$index
+res_ics  <- compute_pca_index(data_scaled, vars_ics, "ICS")
+data$ICS <- res_ics$index
+data_scaled$ICS <- res_ics$index
 
-res_ici  <- compute_pca_index(data_std, vars_ici, "ICI")
-data_std$ICI <- res_ici$index
+data_scaled <- data_scaled %>%
+  mutate(
+    ICP = robust_scale(ICP),
+    ICI = robust_scale(ICI),
+    ICS = robust_scale(ICS)
+  )
 
-res_ics  <- compute_pca_index(data_std, vars_ics, "ICS")
-data_std$ICS <- res_ics$index
 
+data_scaled$NOMGEO <- data$NOMGEO
+data_scaled$AE <- data$AE
+data_scaled$ID <- data$ID
+data_scaled$tcode <- data$tcode
 
-resultados_val <- lapply(names(indices), function(lbl) {
-  validar_pca(data_std, vars = indices[[lbl]], label = lbl, n_comp = 2)
-})
-names(resultados_val) <- names(indices)
+write.csv(data_scaled, "data_scaled.csv", row.names = FALSE)
 
+# Multicolinealidad
+
+modelo <- lm(ICS ~ ICI+ICP+compacd+comppvs+
+               marpacd+marppvs+prod_pacd+Qs_pot+
+               prod_ppvs, data = data_scaled)
+vif(modelo)
 
 # Variables de interés para clustering
-vi <- c("ptf", "marpot","compot",
-        "ICP", "ICI", "ICS", "Qs_pot")
-
+vi <- c("ICI", "ICP", "ICS", "compacd", "comppvs",
+        "marpacd", "marppvs", "prod_pacd",
+         "prod_ppvs", "Qs_pot")
+        
 # Verificar que todas existen
-missing_vi <- vi[!vi %in% names(data_std)]
+missing_vi <- vi[!vi %in% names(data)]
 if (length(missing_vi) > 0) stop("Faltan variables: ", paste(missing_vi, collapse = ", "))
 
-caa <- dplyr::select(data_std, NOMGEO, tcode, AE, ID, all_of(vi))
+
+
+### Base de datos para clustering
+
+caa <- dplyr::select(data_scaled, all_of(vi))
+caa$NOMGEO <- data$NOMGEO
+caa$AE <- data$AE
+caa$ID <- data$ID
+caa$tcode <- data$tcode
 caa_split <- split(caa, caa$tcode)
 
 cat("\nAños disponibles para clustering:", names(caa_split), "\n")
@@ -972,7 +672,7 @@ sapply(caa_split, nrow) %>% print()
 # 5. DETERMINACIÓN DEL NÚMERO ÓPTIMO DE CLUSTERS
 # -----------------------------------------------------------------------
 
-dir.create("resultados_clusters", showWarnings = FALSE)
+#dir.create("resultados_clusters", showWarnings = FALSE)
 
 # Función unificada para WSS + Silueta
 evaluar_k_optimo <- function(df_ano, vars, k_max = 10, seed = 56) {
@@ -1134,11 +834,32 @@ comparaciones_todas <- bind_rows(lapply(names(sensibilidad_anios), function(anio
 
 comparaciones_todas
 
+# Asegurar que k es numérico y anio es factor
+comparaciones_todas <- comparaciones_todas %>%
+  mutate(k = as.numeric(k),
+         anio = as.factor(anio))
+
+# Gráfico de líneas
+p_lineas <- ggplot(comparaciones_todas, aes(x = k, y = ari, color = anio, group = anio)) +
+  geom_line() + geom_point() +
+  labs(title = "Estabilidad del clustering (ARI) por año") +
+  theme_minimal()
+
+# Mapa de calor
+p_heatmap <- ggplot(comparaciones_todas, aes(x = factor(k), y = anio, fill = ari)) +
+  geom_tile() + geom_text(aes(label = round(ari, 2)), size = 3) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Heatmap de ARI", x = "k", y = "Año")
+
+# Mostrar gráficos
+print(p_lineas)
+print(p_heatmap)
+
 # -----------------------------------------------------------------------
 # 8. CLUSTERING JERÁRQUICO (WARD.D2)
 # -----------------------------------------------------------------------
 
-hclust_anual <- function(df, vars, k = 6,
+hclust_anual <- function(df, vars, k = 4,
                          dist_method = "euclidean",
                          hclust_method = "ward.D2",    # ward.D2 es más estable que ward.D
                          cluster_colname = "cluster_ward") {
@@ -1160,7 +881,7 @@ hclust_anual <- function(df, vars, k = 6,
 }
 
 resultados_hclust <- lapply(caa_split, function(df) {
-  tryCatch(hclust_anual(df, vars = vi, k = 6, cluster_colname = "cluster_ward"),
+  tryCatch(hclust_anual(df, vars = vi, k = 4, cluster_colname = "cluster_ward"),
            error = function(e) { cat("Error:", e$message, "\n"); NULL })
 })
 
@@ -1190,8 +911,8 @@ advanced_clustering <- function(data,
                                 vars, 
                                 cluster_col_base = "cluster_ward", # nombre de la columna base (opcional)
                                 year_label = NULL,
-                                G_gmm = 6,               # número de clusters para GMM (si se fija)
-                                k_spec = 6,               # número de clusters para espectral
+                                G_gmm = 4,               # número de clusters para GMM (si se fija)
+                                k_spec = 4,               # número de clusters para espectral
                                 eps_dbscan = 0.65,         # eps para DBSCAN (ajustar según datos)
                                 minPts_dbscan = 7,
                                 run_dbscan = TRUE) {
@@ -1229,12 +950,8 @@ advanced_clustering <- function(data,
   data$cluster_gmm <- if (!is.null(gmm_fijo)) as.factor(gmm_fijo$classification) else NA
   # Espectral
   data$cluster_spec <- if (!is.null(spec)) as.factor(as.integer(spec)) else NA
-  # DBSCAN
-  data$cluster_db <- if (!is.null(db)) {
-    # Obtener vector de asignación de clusters
-    clusters <- db$cluster}
-  
-  
+  # DBSCAN  (BUG FIX: el bloque if estaba incompleto; se añade la rama else)
+  data$cluster_db <- if (!is.null(db)) as.factor(db$cluster) else NA
   
   # 4. Cálculo de siluetas
   dist_matrix <- dist(datos_matrix)
@@ -1310,8 +1027,8 @@ for (anio in names(resultados_hclust)) {
       data = df_actualizado,
       vars = vi,
       year_label = anio,
-      G_gmm = 6,
-      k_spec = 6,
+      G_gmm = 4,
+      k_spec = 4,
       eps_dbscan = 0.65,
       minPts_dbscan = 7,
       run_dbscan = TRUE
@@ -1355,24 +1072,13 @@ write.csv(sil_summary, "siluetas_avanzadas.csv", row.names = FALSE)
 write.csv(ari_summary, "ari_comparacion.csv", row.names = FALSE)
 saveRDS(resultados_avanzados, "resultados_avanzados.rds")
 
-# Para el año 2003
-df_2003_av <- resultados_avanzados[["2003"]]$data_actualizado
-df_2003_av %>%
-  pivot_longer(cols = all_of(vi), names_to = "variable", values_to = "valor") %>%
-  ggplot(aes(x = cluster_spec, y = valor, fill = cluster_spec)) +
-  geom_boxplot() +
-  facet_wrap(~ variable, scales = "free_y") +
-  labs(title = "Distribución de variables por cluster espectral - 2003",
-       x = "Cluster espectral", y = "Valor") +
-  theme_minimal() +
-  theme(legend.position = "none")
 
 # 10. ESTADÍSTICAS DESCRIPTIVAS POR CLUSTER
 # -----------------------------------------
 
 summarize_clusters <- function(data, 
                                vars, 
-                               cluster_col = "cluster_spec", 
+                               cluster_col = "cluster_gmm", 
                                year_label = NULL) {
   
   # Verificar que la columna de clusters existe
@@ -1423,7 +1129,7 @@ lista_resumenes <- map2(resultados_avanzados, names(resultados_avanzados), funct
   if (is.null(res)) return(NULL)
   
   # Verificar que la columna cluster_spec existe
-  if (!"cluster_spec" %in% colnames(res$data_actualizado)) {
+  if (!"cluster_gmm" %in% colnames(res$data_actualizado)) {
     warning("La columna 'cluster_spec' no existe en el año ", anio)
     return(NULL)
   }
@@ -1431,7 +1137,7 @@ lista_resumenes <- map2(resultados_avanzados, names(resultados_avanzados), funct
   summarize_clusters(
     data = res$data_actualizado,   # data frame completo
     vars = vi,
-    cluster_col = "cluster_spec",
+    cluster_col = "cluster_gmm",
     year_label = anio
   )
 })
@@ -1443,6 +1149,8 @@ resumen_total <- bind_rows(lista_resumenes)
 resumen_2003 <- resumen_total %>% filter(anio == "2003")
 
 # Redondear y mostrar con kable
+library(kableExtra)
+
 resumen_2003 %>%
   mutate(across(c(media, mediana, de, q1, q3), ~ round(., 2))) %>%
   kable(
@@ -1468,7 +1176,7 @@ write_csv(resumen_total, "resumen_clusters_todos_anos.csv")
 
 plot_cluster_boxplots <- function(data, 
                                   vars, 
-                                  cluster_col = "cluster_spc", 
+                                  cluster_col = "cluster_gmm", 
                                   year_label = NULL) {
   
   # Verificar que la columna de clusters existe
@@ -1501,8 +1209,8 @@ plot_cluster_boxplots <- function(data,
     geom_boxplot() +
     facet_wrap(~ variable, scales = "free_y") +
     labs(title = ifelse(year_label != "", 
-                        paste("Distribución de variables por cluster -", year_label),
-                        "Distribución de variables por cluster"),
+                        paste("Distribución de variables por agrupación -", year_label),
+                        "Distribución de variables por agrupación"),
          x = "Cluster", y = "Valor") +
     theme_minimal() +
     theme(legend.position = "none")
@@ -1516,7 +1224,7 @@ boxplot_list <- map2(resultados_avanzados, names(resultados_avanzados), function
   plot_cluster_boxplots(
     data = res$data_actualizado,
     vars = vi,
-    cluster_col = "cluster_spec",
+    cluster_col = "cluster_gmm",
     year_label = anio
   )
 })
@@ -1533,13 +1241,17 @@ walk2(boxplot_list, names(boxplot_list), function(plot, anio) {
 
 # Verificación rápida
 print(boxplot_list[["2003"]])
+print(boxplot_list[["2008"]])
+print(boxplot_list[["2013"]])
+print(boxplot_list[["2018"]])
+print(boxplot_list[["2023"]])
 
 # 11. ANÁLISIS DE VARIANZA (ANOVA) Y POST-HOC
 # -------------------------------------------
 
 anova_clusters <- function(data, 
                            vars, 
-                           cluster_col = "cluster_ward", 
+                           cluster_col = "cluster_gmm", 
                            year_label = NULL) {
   
   # Verificar columna de clusters
@@ -1620,7 +1332,7 @@ anova_list <- map2(resultados_avanzados, names(resultados_avanzados), function(r
   anova_clusters(
     data = res$data_actualizado,
     vars = vi,
-    cluster_col = "cluster_spec",
+    cluster_col = "cluster_gmm",
     year_label = anio
   )
 })
@@ -1629,6 +1341,8 @@ names(anova_list) <- names(resultados_avanzados)
 anova_total <- bind_rows(anova_list)
 
 # Ver tabla completa
+library(kableExtra)
+
 anova_total %>%
   mutate(across(c(df, sumsq, meansq, statistic, p.value, eta_sq), ~ round(., 4))) %>%
   kable(caption = "Resultados de ANOVA por variable y año",
@@ -1640,11 +1354,9 @@ write_csv(anova_total, "anova_clusters_todos_anos.csv")
 
 # Pruebas post-hoc de Tukey para cada variable
 
-library(agricolae)   # para HSD.test
-
 anova_tukey_final <- function(data, 
                               vars, 
-                              cluster_col = "cluster_spec", 
+                              cluster_col = "cluster_gmm", 
                               year_label = NULL,
                               p_threshold = 0.05) {
   
@@ -1766,7 +1478,10 @@ write.csv(tukey_all_years, "tukey_todos_anos.csv", row.names = FALSE)
 # 9. VALIDACIÓN DE SUPUESTOS
 # ----------------------------
 
-library(car)   # para leveneTest
+library(biotools)
+library(clue)
+library(cluster)
+library(clValid)
 
 diagnosticos_clusters <- function(data, 
                                   vars, 
@@ -1899,6 +1614,297 @@ kable(normalidad_all, digits = 4, caption = "Pruebas de normalidad (Shapiro-Wilk
 kable(levene_all, digits = 4, caption = "Prueba de Levene para homogeneidad de varianzas") %>%
   kable_styling("striped")
 
+library(fpc)      # para índices alternativos
+
+diagnosticos_clusters_robusto <- function(data, vars, cluster_col = "cluster_gmm",
+                                          year_label = NULL, n_bootstrap = 50) {
+  
+  # Función auxiliar para añadir año sin errores
+  add_year <- function(df, yr) {
+    if (is.null(yr)) return(df)
+    if (nrow(df) == 0) return(data.frame(anio = character(0), df, stringsAsFactors = FALSE))
+    cbind(data.frame(anio = rep(yr, nrow(df)), stringsAsFactors = FALSE), df)
+  }
+  
+  if (!cluster_col %in% colnames(data)) stop("Falta la columna de clústeres.")
+  if (length(vars) == 0) stop("No se especificaron variables.")
+  if (is.null(year_label) && "tcode" %in% colnames(data)) year_label <- unique(data$tcode)[1]
+  
+  data[[cluster_col]] <- as.factor(data[[cluster_col]])
+  grupos <- levels(data[[cluster_col]])
+  k <- length(grupos)
+  p <- length(vars)
+  
+  if (k < 2) {
+    warning("Se requieren al menos 2 grupos.")
+    return(NULL)
+  }
+  
+  # Verificación crítica: tamaño mínimo por grupo
+  tamaños <- table(data[[cluster_col]])
+  if (any(tamaños <= p + 2)) {
+    warning("Algún grupo tiene muy pocas observaciones (<= p+2). Algunos índices podrían no calcularse.")
+  }
+  
+  # 1. Normalidad multivariada (Mardia) --------------------------------------------
+  norm_multi <- data.frame()
+  for (g in grupos) {
+    dat_g <- na.omit(data[data[[cluster_col]] == g, vars, drop = FALSE])
+    s <- p_s <- kurt <- p_k <- NA
+    if (nrow(dat_g) > p + 2) {
+      mard <- tryCatch(psych::mardia(dat_g, plot = FALSE), error = function(e) NULL)
+      if (!is.null(mard)) {
+        if (length(mard$skewness) == 1) s <- mard$skewness
+        if (length(mard$p.skew) == 1)   p_s <- mard$p.skew
+        if (length(mard$kurtosis) == 1) kurt <- mard$kurtosis
+        if (length(mard$p.kurt) == 1)   p_k <- mard$p.kurt
+      }
+    }
+    norm_multi <- rbind(norm_multi, data.frame(
+      cluster = g, skewness = s, p_skew = p_s,
+      kurtosis = kurt, p_kurt = p_k, stringsAsFactors = FALSE
+    ))
+  }
+  norm_multi <- add_year(norm_multi, year_label)
+  
+  # 2. Box's M --------------------------------------------------------------------
+  box_result <- tryCatch({
+    bt <- biotools::boxM(data[, vars], grouping = data[[cluster_col]])
+    add_year(data.frame(statistic = bt$statistic, p_value = bt$p.value), year_label)
+  }, error = function(e) add_year(data.frame(statistic = NA, p_value = NA), year_label))
+  
+    
+  # 3. Estabilidad bootstrap (Jaccard) y separación (silueta, Dunn alternativo) ----
+  estabilidad <- NULL
+  if (n_bootstrap > 0) {
+    # Distancia para silueta / índices
+    dist_orig <- tryCatch(dist(data[, vars]), error = function(e) NULL)
+    
+    if (!is.null(dist_orig)) {
+      sil_orig <- tryCatch(
+        as.numeric(summary(silhouette(as.integer(data[[cluster_col]]), dist_orig))$avg.width),
+        error = function(e) NA
+      )
+      # Usamos cluster.stats de fpc (más robusto que dunn a veces)
+      dunn_orig <- tryCatch({
+        cs <- fpc::cluster.stats(d = dist_orig, clustering = as.integer(data[[cluster_col]]),
+                                 silhouette = FALSE, G2 = FALSE, G3 = FALSE)
+        cs$dunn2   # índice de Dunn generalizado (más estable)
+      }, error = function(e) NA)
+    } else {
+      sil_orig <- NA
+      dunn_orig <- NA
+    }
+    
+    # Bootstrap
+    jaccard_boot <- numeric(n_bootstrap)
+    for (b in seq_len(n_bootstrap)) {
+      idx <- sample(nrow(data), replace = TRUE)
+      boot_data <- data[idx, ]
+      fit_b <- tryCatch(
+        Mclust(boot_data[, vars], G = k, modelNames = best_model, verbose = FALSE),
+        error = function(e) NULL
+      )
+      if (!is.null(fit_b) && length(unique(fit_b$classification)) == k) {
+        orig_cl <- as.integer(data[[cluster_col]][idx])
+        boot_cl <- fit_b$classification
+        jacc_mat <- matrix(0, k, k)
+        for (i in 1:k) {
+          for (j in 1:k) {
+            inter <- sum(orig_cl == i & boot_cl == j)
+            union <- sum(orig_cl == i | boot_cl == j)
+            jacc_mat[i, j] <- if (union > 0) inter / union else 0
+          }
+        }
+        asignacion <- clue::solve_LSAP(1 - jacc_mat)
+        jacc_boot_vals <- jacc_mat[cbind(1:k, asignacion)]
+        jaccard_boot[b] <- mean(jacc_boot_vals)
+      } else {
+        jaccard_boot[b] <- NA
+      }
+    }
+    jaccard_boot <- jaccard_boot[!is.na(jaccard_boot)]
+    estabilidad <- list(
+      jaccard_medio       = if (length(jaccard_boot) > 0) mean(jaccard_boot) else NA,
+      jaccard_bootstrap   = jaccard_boot,
+      silhouette_original = sil_orig,
+      dunn_original       = dunn_orig
+    )
+  }
+  
+  list(
+    normalidad_multi = norm_multi,
+    box_m            = box_result,
+    estabilidad      = estabilidad
+  )
+}
+
+diagnosticos_anios_g <- list()
+
+for (anio in names(resultados_avanzados)) {
+  cat("\n==========", anio, "==========\n")
+  res <- resultados_avanzados[[anio]]
+  if (is.null(res)) next
+  
+  diag <- tryCatch(
+    diagnosticos_clusters_robusto(
+      data          = res$data_actualizado,
+      vars          = vi,
+      cluster_col   = "cluster_gmm",
+      year_label    = anio,
+      n_bootstrap   = 50
+    ),
+    error = function(e) {
+      cat("Error en", anio, ":", e$message, "\n")
+      NULL
+    }
+  )
+  diagnosticos_anios_g[[anio]] <- diag
+}
+
+norm_multi_all   <- bind_rows(lapply(diagnosticos_anios_g, `[[`, "normalidad_multi"), .id = "anio")
+box_m_all        <- bind_rows(lapply(diagnosticos_anios_g, `[[`, "box_m"), .id = "anio")
+
+# Estabilidad (tabla resumen)
+estabilidad_tab <- do.call(rbind, lapply(names(diagnosticos_anios_g), function(a) {
+  e <- diagnosticos_anios_g[[a]]$estabilidad
+  if (!is.null(e)) {
+    data.frame(anio = a, jaccard = e$jaccard_medio,
+               silueta = e$silhouette_original, dunn = e$dunn_original)
+  }
+}))
+
+# ------------------------------------------------------------
+# 1. Combinar todos los años en data.frames únicos
+# ------------------------------------------------------------
+
+
+# Normalidad multivariada (Mardia)
+norm_multi_all <- bind_rows(lapply(diagnosticos_anios_g, `[[`, "normalidad_multi"), .id = "anio")
+
+# Box's M
+box_m_all <- bind_rows(lapply(diagnosticos_anios_g, `[[`, "box_m"), .id = "anio")
+
+# Estabilidad (resumen tabular)
+estabilidad_tab <- do.call(rbind, lapply(names(diagnosticos_anios_g), function(a) {
+  e <- diagnosticos_anios_g[[a]]$estabilidad
+  if (!is.null(e)) {
+    data.frame(anio = a,
+               jaccard_medio = e$jaccard_medio,
+               silhouette    = e$silhouette_original,
+               dunn          = e$dunn_original,
+               stringsAsFactors = FALSE)
+  } else {
+    NULL
+  }
+}))
+
+# ------------------------------------------------------------
+# 2. Guardar como CSV
+# ------------------------------------------------------------
+write.csv(norm_multi_all,  "normalidad_multivariada.csv", row.names = FALSE)
+write.csv(box_m_all,       "box_m_homogeneidad.csv",      row.names = FALSE)
+write.csv(estabilidad_tab, "estabilidad_clusters.csv",     row.names = FALSE)
+
+# ------------------------------------------------------------
+# 3. Mostrar tablas con kable (formato HTML o LaTeX)
+# ------------------------------------------------------------
+# Normalidad multivariada
+kable(norm_multi_all, digits = 4,
+      caption = "Normalidad multivariada (Mardia) por conglomerado") %>%
+  kable_styling("striped", full_width = FALSE)
+
+# Box's M
+kable(box_m_all, digits = 4,
+      caption = "Prueba de homogeneidad de covarianzas (Box's M)") %>%
+  kable_styling("striped", full_width = FALSE)
+
+# Estabilidad y separación
+kable(estabilidad_tab, digits = 4,
+      caption = "Estabilidad bootstrap e índices de separación") %>%
+  kable_styling("striped", full_width = FALSE)
+
+# Función para calcular entropía normalizada a partir de la matriz z
+entropia_normalizada <- function(z) {
+  k <- ncol(z)
+  n <- nrow(z)
+  z[z < 1e-10] <- 1e-10   # evitar log(0)
+  entropia_total <- -sum(z * log(z))
+  1 - entropia_total / (n * log(k))
+}
+
+# Función para obtener la entropía por grupo
+entropia_por_grupo <- function(z, grupos) {
+  k <- ncol(z)
+  res <- data.frame()
+  for (g in unique(grupos)) {
+    idx <- which(grupos == g)
+    if (length(idx) > 0) {
+      z_g <- z[idx, , drop = FALSE]
+      z_g[z_g < 1e-10] <- 1e-10
+      entropia_g <- -sum(z_g * log(z_g))
+      E_g <- 1 - entropia_g / (length(idx) * log(k))
+      res <- rbind(res, data.frame(cluster = g, entropia = E_g))
+    }
+  }
+  res
+}
+
+# Bucle por años
+entropia_anios <- data.frame()
+entropia_detalle <- data.frame()
+
+for (anio in names(resultados_avanzados)) {
+  res <- resultados_avanzados[[anio]]
+  
+  # Determinar qué modelo GMM usar (prioridad: gmm_fijo, luego gmm_auto)
+  modelo <- NULL
+  if ("gmm_fijo" %in% names(res)) {
+    modelo <- res$gmm_fijo
+  } else if ("gmm_auto" %in% names(res)) {
+    modelo <- res$gmm_auto
+  }
+  
+  if (is.null(modelo)) {
+    cat("Año", anio, ": No se encontró modelo GMM.\n")
+    next
+  }
+  
+  z <- modelo$z
+  if (is.null(z)) {
+    cat("Año", anio, ": Matriz z no disponible.\n")
+    next
+  }
+  
+  # Entropía global
+  E_global <- entropia_normalizada(z)
+  entropia_anios <- rbind(entropia_anios, data.frame(anio = anio, entropia = E_global))
+  
+  # Entropía por grupo (necesita la asignación dura)
+  grupos <- modelo$classification
+  detalle <- entropia_por_grupo(z, grupos)
+  detalle$anio <- anio
+  entropia_detalle <- rbind(entropia_detalle, detalle)
+  
+  cat("Año", anio, ": Entropía normalizada =", round(E_global, 4), "\n")
+}
+
+# Mostrar tablas
+
+kable(entropia_anios, digits = 4, 
+      caption = "Entropía normalizada de clasificación por año (GMM)") %>%
+  kable_styling("striped")
+
+kable(entropia_detalle, digits = 4, 
+      caption = "Entropía por conglomerado y año") %>%
+  kable_styling("striped")
+
+# Guardar entropía global por año
+write.csv(entropia_anios, "entropia_clasificacion_global.csv", row.names = FALSE)
+
+# Guardar entropía detallada por grupo y año
+write.csv(entropia_detalle, "entropia_clasificacion_por_grupo.csv", row.names = FALSE)
+
 
 # 10. MANOVA y PERMANOVA global
 # ----------
@@ -1915,16 +1921,7 @@ ensure_pairwiseAdonis <- function() {
   library(pairwiseAdonis)
 }
 
-# Asegurar que los paquetes están instalados
-if (!require("vegan")) install.packages("vegan")
-if (!require("devtools")) install.packages("devtools")
-if (!require("pairwiseAdonis")) {
-  devtools::install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
-}
-
-library(vegan)
 library(pairwiseAdonis)
-
 
 # Función multivariate_tests 
 multivariate_tests <- function(data, 
@@ -2054,9 +2051,9 @@ write.csv(permanova_global_all, "permanova_global_todos_anos.csv", row.names = F
 # Guardar resultados completos en un archivo RDS
 saveRDS(resultados_multivariados, "resultados_multivariados.rds")
 
-# Prueba de Discriminación: Linear Discriminant Analysis (LDA)
 
-library(MASS)
+
+# Prueba de Discriminación: Linear Discriminant Analysis (LDA)
 
 evaluar_lda <- function(data, 
                         cluster_col, 
@@ -2223,46 +2220,62 @@ importancia_variables_lda <- function(lda_model, data = NULL, metodo = "ambos") 
 }
 
 # Ejemplo para un modelo específico
-imp03 <- importancia_variables_lda(
-  lda_model = resultados_lda[["2003_cluster_spec"]]$lda_model,
-  data = resultados_avanzados[["2003"]]$data_actualizado,
-  metodo = "ambos"
-)
-print(imp03)
-write.csv(imp03, "importancia_2003_gmm.csv", row.names = FALSE)
 
-imp08 <- importancia_variables_lda(
-  lda_model = resultados_lda[["2008_cluster_gmm"]]$lda_model,
-  data = resultados_avanzados[["2008"]]$data_actualizado,
-  metodo = "ambos"
-)
-print(imp08)
-write.csv(imp08, "importancia_2008_gmm.csv", row.names = FALSE)
+calcular_importancia_lda_anios <- function(anios, metodo = "ambos", output_dir = ".") {
+  # Verificar que los objetos globales existen
+  if (!exists("resultados_lda") || !exists("resultados_avanzados")) {
+    stop("No se encontraron los objetos 'resultados_lda' o 'resultados_avanzados' en el entorno global.")
+  }
+  
+  resultados <- list()
+  
+  for (anio in anios) {
+    cat("\n", strrep("-", 50), "\n")
+    cat("Procesando año:", anio, "\n")
+    cat(strrep("-", 50), "\n")
+    
+    # Construir nombres de acceso
+    nombre_lda <- paste0(anio, "_cluster_gmm")
+    nombre_data <- as.character(anio)
+    
+    # Verificar existencia en las listas
+    if (is.null(resultados_lda[[nombre_lda]])) {
+      warning("No se encontró '", nombre_lda, "' en resultados_lda. Se omite el año.")
+      next
+    }
+    if (is.null(resultados_avanzados[[nombre_data]])) {
+      warning("No se encontró '", nombre_data, "' en resultados_avanzados. Se omite el año.")
+      next
+    }
+    
+    lda_model <- resultados_lda[[nombre_lda]]$lda_model
+    data <- resultados_avanzados[[nombre_data]]$data_actualizado
+    
+    # Calcular importancia
+    imp <- importancia_variables_lda(
+      lda_model = lda_model,
+      data = data,
+      metodo = metodo
+    )
+    
+    # Mostrar resultado
+    print(imp)
+    
+    # Guardar CSV
+    archivo <- file.path(output_dir, paste0("importancia_", anio, "_gmm.csv"))
+    write.csv(imp, archivo, row.names = FALSE)
+    cat("Archivo guardado:", archivo, "\n")
+    
+    resultados[[as.character(anio)]] <- imp
+  }
+  
+  invisible(resultados)
+}
 
-imp13 <- importancia_variables_lda(
-  lda_model = resultados_lda[["2013_cluster_gmm"]]$lda_model,
-  data = resultados_avanzados[["2013"]]$data_actualizado,
-  metodo = "ambos"
-)
-print(imp13)
-write.csv(imp13, "importancia_2013_gmm.csv", row.names = FALSE)
+anios <- c(2003, 2008, 2013, 2018, 2023)
 
-imp18 <- importancia_variables_lda(
-  lda_model = resultados_lda[["2018_cluster_gmm"]]$lda_model,
-  data = resultados_avanzados[["2018"]]$data_actualizado,
-  metodo = "ambos"
-)
-print(imp18)
-write.csv(imp18, "importancia_2018_gmm.csv", row.names = FALSE)
-
-imp23 <- importancia_variables_lda(
-  lda_model = resultados_lda[["2023_cluster_gmm"]]$lda_model,
-  data = resultados_avanzados[["2023"]]$data_actualizado,
-  metodo = "ambos"
-)
-print(imp23)
-write.csv(imp23, "importancia_2023_gmm.csv", row.names = FALSE)
-
+# Ejecutar
+resultados_importancia <- calcular_importancia_lda_anios(anios)
 
 ### pruebas de Kruskal-Wallis y Friedman
 
@@ -2379,8 +2392,9 @@ test_kw_friedman <- function(resultados_avanzados,
           tidyr::drop_na() %>%
           tidyr::pivot_wider(names_from = anio, values_from = valor, values_fill = NA)
         
-        # Verificar que haya al menos 2 años y que cada ID tenga datos en todos los años
-        anos_presentes <- colnames(datos_ancho)[-1]  # excluir id_col
+        # Filtrar IDs que tengan datos en todos los años
+        # BUG FIX: excluir columnas que no son anios (id_col y clust)
+        anos_presentes <- setdiff(colnames(datos_ancho), c(id_col, clust))
         if (length(anos_presentes) < 2) {
           cat("    ⚠️", var, ": menos de 2 años, se omite.\n")
           next
@@ -2652,7 +2666,6 @@ resultados_totales <- bind_rows(lapply(names(resultados_pares), function(nombre)
 write.csv(resultados_totales, "comparaciones_pares_todas.csv", row.names = FALSE)
 
 
-
 # ================================================================
 #### *** Aglomeraciones sectoriales por entidad ***
 
@@ -2858,8 +2871,8 @@ cluster_by_entity <- function(df_ano,
   # Unir con el data frame original (incluye entidades que no cumplían min_obs)
   df_final <- df_ano %>%
     left_join(
-      resultados_final %>% dplyr::select(row_id, cluster_gmm, cluster_spectral, k_gmm, k_spectral),
-      by = row_id_col
+      resultados_final %>% dplyr::select(!!sym(row_id_col), cluster_gmm, cluster_spectral, k_gmm, k_spectral),
+      by = row_id_col   # BUG FIX: se usa el valor de la variable, no la cadena literal 'row_id_col'
     ) %>%
     # Para las entidades no procesadas, asignar NA o valor por defecto
     mutate(
@@ -2913,8 +2926,11 @@ for (anio in names(resultados_por_entidad_anios)) {
 }
 
 ### 12. Analizar transición
+# ----------------------------------------------------------------------------
+# 1. PROCESAMIENTO POR AÑO (clustering avanzado)
+# ----------------------------------------------------------------------------
 
-resultados_avanzados <- list()
+resultados_avanzados_t <- list()
 
 for (anio in names(caa_split)) {
   cat("\n========== Procesando año:", anio, "==========\n")
@@ -2924,36 +2940,137 @@ for (anio in names(caa_split)) {
     vars = vi,
     cluster_col_base = "cluster_ward",  
     year_label = anio,
-    G_gmm = 6,
-    k_spec = 6,
+    G_gmm = 4,
+    k_spec = 4,
     eps_dbscan = 0.65,
     minPts_dbscan = 7,
-    run_dbscan = FALSE 
+    run_dbscan = T 
   )
-  resultados_avanzados[[anio]] <- res
+  resultados_avanzados_t[[anio]] <- res
 }
 
-df_unificado <- bind_rows(lapply(names(resultados_avanzados), function(anio) {
-  res <- resultados_avanzados[[anio]]
-  if (is.null(res)) return(NULL)
-  # Extraer el data frame actualizado
-  df_anio <- res$data_actualizado
-  # Añadir columna de año
-  df_anio %>%
-    mutate(tcode = as.numeric(anio))
-}))
+# ----------------------------------------------------------------------------
+# 2. UNIFICAR DATOS DE TODOS LOS AÑOS EN UN SOLO DATA FRAME
+# ----------------------------------------------------------------------------
 
-# Verificar estructura
+# Extraemos los data frames actualizados y agregamos columna tcode (año numérico)
+df_unificado <- map_dfr(names(resultados_avanzados_t), function(anio) {
+  res <- resultados_avanzados_t[[anio]]
+  if (is.null(res)) return(NULL)
+  res$data_actualizado %>%
+    mutate(tcode = as.integer(anio))
+})
+
+# Verificamos estructura
 glimpse(df_unificado)
 
+# Creamos el identificador único por unidad espacial
 df_unificado <- df_unificado %>%
   mutate(ID = paste(NOMGEO, AE, sep = "_"))
 
-# Definir pares de años (ajusta según tus años)
+# ----------------------------------------------------------------------------
+# 3. DEFINIR PERIODOS DE TRANSICIÓN
+# ----------------------------------------------------------------------------
+
 pares_anios <- list(
   c(2003, 2008), c(2008, 2013), c(2013, 2018), c(2018, 2023), c(2003, 2023)
 )
 names(pares_anios) <- c("2003_2008", "2008_2013", "2013_2018", "2018_2023", "2003_2023")
+
+# ----------------------------------------------------------------------------
+# 4. FUNCIÓN PARA CREAR MATRIZ DE TRANSICIÓN
+# ----------------------------------------------------------------------------
+
+crear_matriz_transicion <- function(datos, 
+                                    anio_inicio, 
+                                    anio_fin, 
+                                    cluster_col = "cluster_gmm",
+                                    id_col = "ID",
+                                    time_col = "tcode") {
+  
+  # Verificar columnas necesarias
+  columnas_necesarias <- c(id_col, time_col, cluster_col)
+  faltantes <- setdiff(columnas_necesarias, colnames(datos))
+  if (length(faltantes) > 0) {
+    stop("Faltan columnas: ", paste(faltantes, collapse = ", "))
+  }
+  
+  # --- Verificar duplicados (con base R) ---
+  # Filtrar filas de los años de interés
+  idx <- which(datos[[time_col]] %in% c(anio_inicio, anio_fin))
+  if (length(idx) == 0) {
+    stop("No hay datos para los años especificados.")
+  }
+  
+  # Tabla de frecuencias ID x año
+  frec <- table(datos[[id_col]][idx], datos[[time_col]][idx])
+  if (any(frec > 1)) {
+    stop("Hay IDs con múltiples filas en un mismo año. Revisa los datos.")
+  }
+  
+  # --- Extraer clusters de inicio y fin ---
+  # Año inicio
+  idx_inicio <- which(datos[[time_col]] == anio_inicio)
+  inicio <- data.frame(
+    id = datos[[id_col]][idx_inicio],
+    cluster_inicio = datos[[cluster_col]][idx_inicio],
+    stringsAsFactors = FALSE
+  )
+  names(inicio)[1] <- id_col
+  
+  # Año fin
+  idx_fin <- which(datos[[time_col]] == anio_fin)
+  fin <- data.frame(
+    id = datos[[id_col]][idx_fin],
+    cluster_fin = datos[[cluster_col]][idx_fin],
+    stringsAsFactors = FALSE
+  )
+  names(fin)[1] <- id_col
+  
+  # --- Unir por ID y contar transiciones ---
+  # Unión (inner join)
+  transiciones <- merge(inicio, fin, by = id_col, all = FALSE)
+  
+  # Si no hay transiciones, crear data frame vacío con estructura adecuada
+  if (nrow(transiciones) == 0) {
+    transiciones <- data.frame(cluster_inicio = integer(), 
+                               cluster_fin = integer(), 
+                               n = integer())
+  } else {
+    # Contar combinaciones
+    transiciones <- aggregate(list(n = rep(1, nrow(transiciones))), 
+                              by = list(cluster_inicio = transiciones$cluster_inicio, 
+                                        cluster_fin = transiciones$cluster_fin), 
+                              FUN = length)
+  }
+  
+  # --- Completar todas las combinaciones posibles con cero ---
+  clusters <- sort(unique(c(transiciones$cluster_inicio, transiciones$cluster_fin)))
+  
+  # Crear cuadrícula completa
+  grid <- expand.grid(cluster_inicio = clusters, cluster_fin = clusters, 
+                      stringsAsFactors = FALSE)
+  
+  # Fusionar con las frecuencias observadas
+  matriz_completa <- merge(grid, transiciones, 
+                           by = c("cluster_inicio", "cluster_fin"), 
+                           all.x = TRUE)
+  matriz_completa$n[is.na(matriz_completa$n)] <- 0
+  
+  # Convertir a matriz usando xtabs (base R)
+  matriz_completa <- xtabs(n ~ cluster_inicio + cluster_fin, data = matriz_completa)
+  matriz_completa <- as.matrix(matriz_completa)
+  
+  # Ordenar filas y columnas
+  matriz_completa <- matriz_completa[order(rownames(matriz_completa)), 
+                                     order(colnames(matriz_completa))]
+  
+  return(matriz_completa)
+}
+
+# ----------------------------------------------------------------------------
+# 5. CALCULAR MATRICES DE TRANSICIÓN PARA CADA PERIODO
+# ----------------------------------------------------------------------------
 
 # Listas para almacenar resultados
 matrices_transicion <- list()
@@ -2961,73 +3078,30 @@ matrices_norm <- list()
 estabilidades <- data.frame(Periodo = character(), Estabilidad = numeric())
 tests_markov <- list()
 
-crear_matriz_transicion <- function(datos, 
-                                    anio_inicio, 
-                                    anio_fin, 
-                                    cluster_col = "cluster_spec",
-                                    id_col = "ID",
-                                    time_col = "tcode") {
-  
-  # Verificar columnas necesarias
-  if (!all(c(id_col, time_col, cluster_col) %in% colnames(datos))) {
-    stop("Faltan columnas necesarias: ", 
-         paste(setdiff(c(id_col, time_col, cluster_col), colnames(datos)), collapse = ", "))
-  }
-  
-  # Filtrar años
-  datos_filt <- datos %>% filter(!!sym(time_col) %in% c(anio_inicio, anio_fin))
-  
-  # Para cada ID, extraer cluster en año inicio y fin (tomar el primer valor si hay duplicados)
-  transicion <- datos_filt %>%
-    group_by(!!sym(id_col)) %>%
-    summarise(
-      cluster_inicio = .data[[cluster_col]][.data[[time_col]] == anio_inicio][1],
-      cluster_fin    = .data[[cluster_col]][.data[[time_col]] == anio_fin][1],
-      .groups = "drop"
-    ) %>%
-    filter(!is.na(cluster_inicio), !is.na(cluster_fin)) %>%
-    count(cluster_inicio, cluster_fin)
-  
-  # Obtener todos los clusters presentes
-  clusters <- sort(unique(c(transicion$cluster_inicio, transicion$cluster_fin)))
-  
-  # Crear cuadrícula completa
-  grid <- expand.grid(cluster_inicio = clusters, cluster_fin = clusters, stringsAsFactors = FALSE)
-  
-  # Unir y rellenar ceros
-  matriz_completa <- grid %>%
-    left_join(transicion, by = c("cluster_inicio", "cluster_fin")) %>%
-    mutate(n = replace_na(n, 0)) %>%
-    pivot_wider(names_from = cluster_fin, values_from = n, values_fill = 0) %>%
-    column_to_rownames("cluster_inicio") %>%
-    as.matrix()
-  
-  # Ordenar filas y columnas
-  matriz_completa <- matriz_completa[order(rownames(matriz_completa)), order(colnames(matriz_completa))]
-  
-  return(matriz_completa)
-}
-
 for (nombre in names(pares_anios)) {
   anios <- pares_anios[[nombre]]
   cat("\n========== Transición", nombre, "==========\n")
   
+  # Calcular matriz de transición (absoluta)
   M <- crear_matriz_transicion(
     datos = df_unificado,
     anio_inicio = anios[1],
     anio_fin = anios[2],
-    cluster_col = "cluster_spec",   
+    cluster_col = "cluster_gmm",   
     id_col = "ID",
     time_col = "tcode"
   )
   matrices_transicion[[nombre]] <- M
   
+  # Matriz normalizada por filas
   M_norm <- prop.table(M, margin = 1)
   matrices_norm[[nombre]] <- M_norm
   
+  # Estabilidad (% de casos en diagonal)
   estab <- sum(diag(M)) / sum(M) * 100
   estabilidades <- rbind(estabilidades, data.frame(Periodo = nombre, Estabilidad = round(estab, 2)))
   
+  # Test de independencia (simulado por si hay celdas con pocos casos)
   test <- chisq.test(M, simulate.p.value = TRUE, B = 10000)
   tests_markov[[nombre]] <- test
   
@@ -3037,13 +3111,13 @@ for (nombre in names(pares_anios)) {
   cat("p-value:", format(test$p.value, scientific = TRUE), "\n")
   
   # Guardar matrices en CSV
-  write.csv(as.data.frame(M), paste0("transicion_", nombre, ".csv"), row.names = TRUE)
-  write.csv(as.data.frame(M_norm), paste0("transicion_norm_", nombre, ".csv"), row.names = TRUE)
+  write_csv(as.data.frame(M), file = paste0("transicion_", nombre, ".csv"))
+  write_csv(as.data.frame(M_norm), file = paste0("transicion_norm_", nombre, ".csv"))
 }
 
-# Ver tabla de estabilidades
+# Mostrar y guardar tabla de estabilidades
 print(estabilidades)
-write.csv(estabilidades, "estabilidades_por_periodo.csv", row.names = FALSE)
+write_csv(estabilidades, "estabilidades_por_periodo_markov.csv")
 
 # Heatmaps
 
@@ -3127,18 +3201,17 @@ print(persistencia)
 write.csv(persistencia, "persistencia_por_cluster.csv", row.names = FALSE)
 
 # Diagrama alluvial (requiere trayectorias completas)
-library(ggalluvial)
 
 trayectorias <- df_unificado %>%
   filter(tcode %in% c(2003, 2008, 2013, 2018, 2023)) %>%
   arrange(ID, tcode) %>%
   group_by(ID) %>%
   summarise(
-    cluster_2003 = .data$cluster_spec[tcode == 2003][1],
-    cluster_2008 = .data$cluster_spec[tcode == 2008][1],
-    cluster_2013 = .data$cluster_spec[tcode == 2013][1],
-    cluster_2018 = .data$cluster_spec[tcode == 2018][1],
-    cluster_2023 = .data$cluster_spec[tcode == 2023][1],
+    cluster_2003 = .data$cluster_gmm[tcode == 2003][1],
+    cluster_2008 = .data$cluster_gmm[tcode == 2008][1],
+    cluster_2013 = .data$cluster_gmm[tcode == 2013][1],
+    cluster_2018 = .data$cluster_gmm[tcode == 2018][1],
+    cluster_2023 = .data$cluster_gmm[tcode == 2023][1],
     .groups = "drop"
   ) %>%
   filter(complete.cases(.))
@@ -3148,8 +3221,8 @@ trayectorias_count <- trayectorias %>%
   summarise(frecuencia = n(), .groups = "drop") %>%
   arrange(desc(frecuencia))
 
-# Top 50 trayectorias
-top_tray <- trayectorias_count %>% slice_head(n = 50)
+# Top 350 trayectorias
+top_tray <- trayectorias_count %>% slice_head(n = 350)
 
 ggplot(top_tray,
        aes(axis1 = cluster_2003, axis2 = cluster_2008, axis3 = cluster_2013,
@@ -3158,8 +3231,8 @@ ggplot(top_tray,
   geom_stratum(width = 1/12, fill = "lightgray", color = "black") +
   geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 3) +
   scale_x_discrete(limits = c("2003", "2008", "2013", "2018", "2023"), expand = c(0.05, 0.05)) +
-  labs(title = "Transiciones de aglomeraciones espectrales 2003-2023",
-       x = "Período", y = "Número de entidades", fill = "Cluster 2003") +
+  labs(title = "Transiciones de aglomeraciones GMM 2003-2023",
+       x = "Período", y = "Número de sector/entidades", fill = "Cluster 2003") +
   theme_minimal()
 ggsave("alluvial_espectral.png", width = 14, height = 8)
 
@@ -3170,12 +3243,6 @@ analizar_cadena_markov <- function(mat_transicion,
                                    periodo = "",
                                    plot = TRUE,
                                    return_all = FALSE) {
-  
-  # Verificar paquetes
-  if (!requireNamespace("igraph", quietly = TRUE)) install.packages("igraph")
-  if (!requireNamespace("diagram", quietly = TRUE)) install.packages("diagram")
-  library(igraph)
-  library(diagram)
   
   # Si la matriz es de frecuencias, normalizar a probabilidades (por filas)
   if (all(mat_transicion == floor(mat_transicion)) && any(mat_transicion > 0)) {
@@ -3275,11 +3342,50 @@ analizar_cadena_markov <- function(mat_transicion,
   }
 }
 
+library(diagram)
+library(igraph)
+
 for (nom in names(matrices_norm)) {
-  cat("\n")
-  analizar_cadena_markov(mat_transicion = matrices_norm[[nom]], 
-                         periodo = nom, 
-                         plot = TRUE)
+  cat("\nProcesando:", nom)
+  
+  # 1. Obtener todos los resultados
+  res <- analizar_cadena_markov(
+    mat_transicion = matrices_norm[[nom]], 
+    periodo = nom, 
+    plot = FALSE,          # Evitamos que dibuje en pantalla ahora
+    return_all = TRUE
+  )
+  
+  # 2. Guardar resultados numéricos en CSV
+  write.csv(res$P, file = paste0("resultados_clusters/matriz_", nom, ".csv"))
+  
+  if (!is.null(res$estacionaria)) {
+    df_est <- data.frame(estado = names(res$estacionaria), prob = res$estacionaria)
+    write.csv(df_est, file = paste0("resultados_clusters/estacionaria_", nom, ".csv"), 
+              row.names = FALSE)
+    
+    df_ret <- data.frame(estado = names(res$tiempos_retorno), tiempo = res$tiempos_retorno)
+    write.csv(df_ret, file = paste0("resultados_clusters/tiempos_retorno_", nom, ".csv"), 
+              row.names = FALSE)
+  }
+  
+  # 3. Guardar el objeto completo como RDS (opcional)
+  saveRDS(res, file = paste0("resultados_clusters/resultados_", nom, ".rds"))
+  
+  # 4. Guardar el gráfico en un archivo PNG
+  png(filename = paste0("resultados_clusters/grafo_", nom, ".png"),
+      width = 800, height = 600, res = 100)
+  
+  # Volvemos a dibujar el gráfico usando la misma función, pero con plot = TRUE
+  # y sin volver a calcular todo (podríamos usar directamente plotmat, pero así es más simple)
+  analizar_cadena_markov(
+    mat_transicion = matrices_norm[[nom]], 
+    periodo = nom, 
+    plot = TRUE,
+    return_all = FALSE    # no necesitamos la salida
+  )
+  
+  dev.off()  # cierra el dispositivo PNG
 }
 
 # Interpretación de resultados
@@ -3291,15 +3397,11 @@ for (nom in names(matrices_norm)) {
 # =======================
 ####### 13. Análisis espacial
 
-library(sf)
-library(spdep)
-library(tmap)
-
 # Leer shapefile de entidades 
 mx <- st_read("C:/Users/gezum/Desktop/Entidades_Federativas/Entidades_Federativas.shp", quiet = TRUE)
 
 # Corrección de encoding 
-encodings <- guess_encoding("C:/Users/gezum/Desktop/Entidades_Federativas/Entidades_Federativas.dbf")
+encodings <- readr::guess_encoding("C:/Users/gezum/Desktop/Entidades_Federativas/Entidades_Federativas.dbf")
 text_columns <- sapply(mx, is.character)
 for (col in names(mx)[text_columns]) {
   mx[[col]] <- iconv(mx[[col]], from = "windows-1252", to = "UTF-8")
@@ -3439,34 +3541,58 @@ moran_global_todos %>%
 # Guardar
 write.csv(moran_global_todos, "moran_global_todos_anos.csv", row.names = FALSE)
     
-# Ejemplo: año 2003, variable "icp" 
-
 # Ver nombres de columnas en el objeto espacial del año 2003
 names(resultados_espaciales[["2003"]]$sf_entidades)
 
-# Ver resultados de Moran global para el año 2003
-print(resultados_espaciales[["2003"]]$moran_global)
 
-anio_ejemplo <- "2003"
-var_ejemplo <- "ICP"  
+# 1. Variable a graficar (debe coincidir con tus nombres: "local_ICS", "local_ICP", etc.)
+var_mapa <- "local_prod_ppvs" 
 
-sf_ent <- resultados_espaciales[[anio_ejemplo]]$sf_entidades
-col_local <- paste0("local_", var_ejemplo)
-sum(is.na(sf_ent$local_ICP))
+# 2. Consolidar los resultados espaciales en una sola tabla sf
+mapa_paneles <- bind_rows(lapply(resultados_espaciales, function(x) {
+  # Extraemos el sf y nos aseguramos de que el año sea una columna
+  df_sf <- x$sf_entidades
+  df_sf$Anio <- as.character(x$anio)
+  return(df_sf)
+}))
 
-# Verificar si hay geometrías inválidas
-invalid <- st_is_valid(sf_ent)
-table(invalid)
+# 3. Crear el panel con ggplot2 
+panel_continuo <- ggplot(mapa_paneles) +
+  # Dibujar los polígonos
+  geom_sf(aes(fill = !!sym(var_mapa)), color = "grey30", size = 0.1) +
+  # Escala de color divergente: Púrpura (bajo) -> Blanco (0) -> Rojo (alto)
+  scale_fill_gradient2(
+    low = "#7C3AED",   # Púrpura intenso (como en tu imagen)
+    mid = "white", 
+    high = "#EF4444",  # Rojo intenso
+    midpoint = 0,
+    name = var_mapa
+  ) +
+  # Dividir en paneles por año
+  facet_wrap(~Anio, ncol = 3) +
+  # Tema minimalista y limpio
+  theme_minimal(base_size = 12) +
+  theme(
+    strip.text = element_text(face = "bold", size = 12),
+    panel.grid.major = element_line(color = "grey95", linetype = "dashed"),
+    axis.text = element_text(size = 8, color = "grey50"),
+    legend.position = "right",
+    plot.title = element_text(face = "bold", size = 14, hjust = 0),
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+  labs(
+    title = paste("Análisis de autocorrelación espacial local:", var_mapa),
+    subtitle = "Evolución temporal 2003-2023 (Valores del estadístico Ii de Moran local)",
+    x = NULL, y = NULL
+  )
 
-# Si hay inválidas, intentar repararlas
-if(any(!invalid)) {
-  sf_ent <- st_make_valid(sf_ent)
-}
+# 4. Guardar en alta calidad
+ggsave(paste0("Panel_Evolucion_", var_mapa, ".png"), 
+       panel_continuo, width = 14, height = 10, dpi = 300)
 
-ggplot(sf_ent) +
-  geom_sf(aes(fill = local_ICP)) +
-  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
-  theme_minimal()
+# Mostrar el resultado
+print(panel_continuo)
+
 
 # Proporción de variables significativas por año
 moran_global_todos %>%
@@ -3487,26 +3613,22 @@ for (anio in names(resultados_espaciales)) {
 }
 
 # Visualización 
-     
 # Inicializar lista vacía
 lista_dfs <- list()
 
 # Iterar sobre los nombres de resultados_avanzados
 for (anio in names(resultados_avanzados)) {
   x <- resultados_avanzados[[anio]]
-  # Verificar que no sea NULL y tenga la estructura esperada
   if (is.null(x) || is.null(x$data_actualizado)) {
     warning("Año ", anio, " no tiene data_actualizado. Se omite.")
     next
   }
   df <- x$data_actualizado
-  # Verificar columnas necesarias
   if (!all(c("AE", "NOMGEO") %in% colnames(df))) {
     warning("Año ", anio, " no tiene columnas AE o NOMGEO. Se omite.")
     next
   }
-  df$tcode <- anio  # o x$anio si está definido
-  # Seleccionar columnas de interés
+  df$tcode <- anio
   df_sel <- df %>% dplyr::select(NOMGEO, AE, tcode, cluster_gmm, cluster_spec)
   lista_dfs[[anio]] <- df_sel
 }
@@ -3514,60 +3636,42 @@ for (anio in names(resultados_avanzados)) {
 # Unir todos los data frames
 jdf <- bind_rows(lista_dfs)
 
-library(viridis)
-library(scales)
+# --- UNIR CON GEOMETRÍAS ---
+# Asegurar que mx tiene columna NOMGEO y es sf
+mx_sf <- mx  # ya es sf
 
-# --- Construcción del data frame unificado con bucle for ---
-lista_dfs <- list()
-for (anio in names(resultados_avanzados)) {
-  x <- resultados_avanzados[[anio]]
-  if (is.null(x) || is.null(x$data_actualizado)) {
-    warning("Año ", anio, " no tiene data_actualizado. Se omite.")
-    next
-  }
-  df <- x$data_actualizado
-  if (!all(c("AE", "NOMGEO") %in% colnames(df))) {
-    warning("Año ", anio, " no tiene columnas AE o NOMGEO. Se omite.")
-    next
-  }
-  df$tcode <- anio  # asumiendo que anio es el nombre del año
-  df_sel <- df %>% dplyr::select(NOMGEO, AE, tcode, cluster_gmm, cluster_spec)
-  lista_dfs[[anio]] <- df_sel
-}
-
-# Unir todos los años
-jdf <- bind_rows(lista_dfs)
-
-# --- Preparar shapefile ---
-# Asegurar que mx está limpio y con nombres normalizados
-mx$NOMGEO <- trimws(mx$NOMGEO)
-jdf$NOMGEO <- trimws(jdf$NOMGEO)
-
-# Unir con geometrías
+# Unir (left_join desde jdf hacia mx)
 jdf_sf <- jdf %>%
-  left_join(mx, by = "NOMGEO") %>%
+  left_join(mx_sf %>% dplyr::select(NOMGEO, geometry), by = "NOMGEO") %>%
   st_as_sf()
 
 # Verificar geometrías vacías
 if (any(st_is_empty(jdf_sf))) {
-  warning("Algunas filas no tienen geometría. Revisa la unión.")
+  warning("Algunas filas no tienen geometría. Se eliminarán.")
+  jdf_sf <- jdf_sf[!st_is_empty(jdf_sf), ]
 }
 
-# --- Gráfico 1: Mapa facetado por sector y año ---
-cluster_elegido <- "cluster_spec"  
+cluster_elegido <- "cluster_gmm"
 
-p1 <- ggplot(jdf_sf) +
-  geom_sf(aes(fill = as.factor(.data[[cluster_elegido]])), color = NA) +
+# Preprocesar geometríaslibrary(rmapshaper)
+
+jdf_sf_clean <- jdf_sf %>%
+  st_make_valid() %>%
+  st_simplify(dTolerance = 0.001)  
+
+p1 <- ggplot(jdf_sf_clean) +
+  geom_sf(aes(fill = as.factor(.data[[cluster_elegido]])), color = NA, size = 0) +
   scale_fill_viridis_d("Cluster") +
   facet_grid(AE ~ tcode) +
   theme_minimal() +
-  labs(title = "Evolución de aglomeraciones espectrales por sector y quinquenio") +
+  labs(title = "Figura 1. Evolución de aglomeraciones (GMM) por sector y quinquenio") +
   theme(axis.text = element_blank(),
         strip.text.y = element_text(angle = 0, size = 8),
         strip.text.x = element_text(size = 10))
+p1
 
-print(p1)
-ggsave("mapa_clusters_sector_anio.png", p1, width = 15, height = 20, limitsize = FALSE)
+# Guardar en disco (evita renderizado en pantalla)
+ggsave("evolucion_clusters.png", p1, width = 12, height = 8, dpi = 300)
 
 # --- Gráfico 2: Barras apiladas proporcionales por entidad ---
 prop_entidad <- jdf %>%
@@ -3581,7 +3685,7 @@ p2 <- ggplot(prop_entidad, aes(x = as.factor(tcode), y = prop,
                                fill = as.factor(.data[[cluster_elegido]]))) +
   geom_bar(stat = "identity", position = "fill", width = 0.8) +
   facet_wrap(~ NOMGEO, ncol = 4, nrow = 8) +
-  labs(title = "Distribución proporcional de conglomerados por Entidad",
+  labs(title = "",
        x = "Quinquenio", y = "Proporción") +
   scale_y_continuous(labels = scales::percent) +
   scale_fill_viridis_d("Cluster") +
@@ -3592,78 +3696,45 @@ p2 <- ggplot(prop_entidad, aes(x = as.factor(tcode), y = prop,
 print(p2)
 ggsave("barras_proporcion_entidad.png", p2, width = 12, height = 18)
 
+# install.packages("patchwork")  # si aún no lo tienes
+library(patchwork)
 
-# Reconstruir jdf_sf si es necesario (basado en resultados_avanzados)
-if (!exists("jdf_sf")) {
-  lista_dfs <- map(resultados_avanzados, function(x) {
-    df <- x$data_actualizado
-    if (!"AE" %in% colnames(df)) stop("Falta columna AE")
-    if (!"NOMGEO" %in% colnames(df)) stop("Falta columna NOMGEO")
-    df$tcode <- x$anio
-    df %>% dplyr::select(NOMGEO, AE, tcode, cluster_gmm, cluster_spec)
-  })
-  jdf <- bind_rows(lista_dfs)
-  
-  # Limpiar nombres y unir con shapefile
-  mx$NOMGEO <- trimws(mx$NOMGEO)
-  jdf$NOMGEO <- trimws(jdf$NOMGEO)
-  jdf_sf <- jdf %>%
-    left_join(mx, by = "NOMGEO") %>%
-    st_as_sf()
-}
+# 1. Versión sin título ni caption de p1
+p1_mod <- p1 +
+  labs(title = NULL, caption = NULL) +
+  theme(plot.margin = margin(10, 15, 10, 10))
 
-# Elegir columna de clusters (espectral por defecto)
-cluster_col <- "cluster_spec"
+# 2. Quitar cualquier caption residual que pudiera tener p2 (va en blanco)
+p2_mod <- p2 +
+  labs(caption = NULL) +
+  theme(plot.margin = margin(10, 15, 10, 10))
 
-library(ggstream)
+# 3. Combinar los gráficos en una sola columna (p1 arriba, p2 abajo)
+figura_completa <- (p1_mod + p2_mod) +
+  plot_annotation(
+    title    = "Figura 1. Evolución de aglomeraciones (GMM) por sector-quinquenio y proporciones de aglomeración por Estado",
+    caption  = "Fuente: Elaboración propia con información de los Censos Económicos 2004, 2009, 2014, 2019, 2024 de INEGI",
+    theme    = theme(
+      plot.title    = element_text(size = 14, face = "bold", hjust = 1),
+      plot.caption  = element_text(size = 8, face = "italic", hjust = 1, vjust = 0),
+      plot.margin   = margin(7, 10, 7, 7)
+    )
+  )
 
-# 1. Preparar datos: contar observaciones por entidad, año y cluster
-stream_data <- jdf_sf %>%
-  st_drop_geometry() %>%
-  group_by(NOMGEO, tcode, .data[[cluster_col]]) %>%
-  summarise(n = n(), .groups = "drop")
-
-# 2. Crear el gráfico con geom_stream
-p_stream <- ggplot(stream_data, aes(x = tcode, y = n, fill = .data[[cluster_col]])) +
-  geom_stream(bw = 0.8) +
-  facet_wrap(~ NOMGEO, ncol = 4) +
-  labs(title = "Distribución de Clusters por Entidad (stream graph)",
-       x = "Quinquenio", y = "Número de observaciones") +
-  scale_fill_viridis_d() +
-  theme_minimal()
-
-print(p_stream)
-ggsave("stream_clusters_entidad.png", p_stream, width = 15, height = 20, limitsize = FALSE)
-
-# Gráfico de barras proporcionales por entidad (sin AE para no saturar)
-p_barras <- jdf_sf %>%
-  group_by(NOMGEO, tcode, .data[[cluster_col]]) %>%
-  summarise(n = n(), .groups = "drop") %>%
-  group_by(NOMGEO, tcode) %>%
-  mutate(prop = n / sum(n)) %>%
-  ggplot(aes(x = as.factor(tcode), y = prop, fill = .data[[cluster_col]])) +
-  geom_bar(stat = "identity", position = "fill") +
-  facet_wrap(~ NOMGEO, ncol = 4) +
-  labs(title = "Proporción de aglomeraciones por entidad y quinquenio",
-       x = "Quinquenio", y = "Proporción") +
-  scale_y_continuous(labels = scales::percent) +
-  scale_fill_viridis_d() +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-print(p_barras)
-ggsave("barras_proporcion_entidad_clean.png", width = 14, height = 18)
+# 4. Mostrar el resultado
+print(figura_completa)
+ggsave("figura1.png", figura_completa, width = 10, height = 12, dpi = 300)
 
 library(trelliscopejs)
 
 caa_trellis <- jdf %>%
   mutate(panel_id = paste(NOMGEO, AE, sep = " - ")) %>%
-  count(panel_id, tcode, .data[[cluster_col]]) %>%
+  dplyr::count(panel_id, tcode, .data[[cluster_elegido]]) %>%
   group_by(panel_id, tcode) %>%
   mutate(prop = n / sum(n)) %>%
   ungroup()
 
-ggplot(caa_trellis, aes(x = tcode, y = prop, fill = .data[[cluster_col]])) +
+ggplot(caa_trellis, aes(x = tcode, y = prop, fill = .data[[cluster_elegido]])) +
   geom_col() +
   facet_trelliscope(~ panel_id, 
                     ncol = 4, 
@@ -3674,4 +3745,182 @@ ggplot(caa_trellis, aes(x = tcode, y = prop, fill = .data[[cluster_col]])) +
        x = "Quinquenio", y = "Proporción") +
   scale_y_continuous(labels = scales::percent) +
   scale_fill_viridis_d() +
+  theme_minimal()
+
+head(jdf_sf)
+
+jdf_tabla <- st_drop_geometry(jdf_sf)
+
+jdf_tabla %>%
+  mutate(elemento = paste(NOMGEO, AE, sep = " - ")) %>%
+  group_by(tcode, cluster_gmm) %>%
+  summarise(
+    elementos = paste(sort(unique(elemento)), collapse = ", "),
+    .groups = "drop"
+  )
+
+library(knitr)
+library(kableExtra)
+
+resumen_gmm_con_ae <- jdf_tabla %>%
+  group_by(tcode, cluster_gmm) %>%
+  summarise(
+    regiones = paste(sort(unique(NOMGEO)), collapse = ", "),
+    actividades = paste(sort(unique(AE)), collapse = ", "),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(tcode, as.numeric(as.character(cluster_gmm)))
+
+# Tabla con dos columnas: regiones y actividades
+resumen_gmm_con_ae %>%
+  kable(caption = "Clústeres GMM por periodo") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"), full_width = FALSE) %>%
+  column_spec(3, width = "15em") %>%   # ancho para regiones
+  column_spec(4, width = "10em")       # ancho para actividades
+
+# Contar elementos por tcode y cluster_gmm (si no lo tienes)
+conteos <- jdf_tabla %>%
+  group_by(tcode, cluster_gmm) %>%
+  summarise(n = n(), .groups = "drop")
+
+ggplot(conteos, aes(x = tcode, y = n, fill = cluster_gmm)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Periodo", y = "Número de elementos", fill = "Clúster") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1")
+
+
+ggplot(resumen_gmm_con_ae, aes(x = tcode, y = AE, fill = cluster_gmm)) +
+  geom_tile(color = "white", linewidth = 0.2) +
+  facet_wrap(~ NOMGEO, scales = "free_y", ncol = 4, nrow = 8) +   # una faceta por región
+  labs(x = "Periodo", y = "Actividad económica", fill = "Clúster") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 4),   # tamaño de etiquetas de AE
+        strip.text = element_text(face = "bold")) +
+  scale_fill_viridis_d()
+
+library(dplyr)
+library(tidyr)
+
+# Asegurar que tcode es numérico o factor ordenado
+jdf_tabla <- jdf_tabla %>%
+  mutate(tcode_num = as.numeric(as.character(tcode)))
+
+flujos <- jdf_tabla %>%
+  arrange(NOMGEO, AE, tcode_num) %>%
+  group_by(NOMGEO, AE) %>%
+  mutate(
+    cluster_prev = lag(cluster_gmm),
+    periodo_prev = lag(tcode_num)
+  ) %>%
+  ungroup() %>%
+  filter(!is.na(cluster_prev)) %>%
+  dplyr::count(cluster_prev, cluster_gmm, periodo_prev, name = "freq") %>%  # dplyr::count
+  rename(cluster_origen = cluster_prev, cluster_destino = cluster_gmm, periodo = periodo_prev)
+
+flujos_agregados <- flujos %>%
+  group_by(cluster_origen, cluster_destino) %>%
+  summarise(freq = sum(freq), .groups = "drop")
+
+library(tidygraph)
+library(ggraph)
+
+# Nodos: todos los clusters únicos
+nodos <- data.frame(
+  name = unique(c(flujos_agregados$cluster_origen, 
+                  flujos_agregados$cluster_destino))
+)
+
+# Aristas
+edges <- flujos_agregados %>%
+  rename(from = cluster_origen, to = cluster_destino) %>%
+  mutate(from = as.character(from), to = as.character(to))
+
+# Grafo
+grafo <- tbl_graph(nodes = nodos, edges = edges, directed = TRUE)
+
+ggraph(grafo, layout = "fr") +   # "fr" = Fruchterman-Reingold
+  geom_edge_link(aes(edge_width = freq), 
+                 arrow = arrow(length = unit(3, 'mm')), 
+                 end_cap = circle(3, 'mm')) +
+  geom_node_point(aes(color = name), size = 8) +
+  geom_node_text(aes(label = name), vjust = 1.5, size = 4) +
+  theme_graph() +
+  labs(title = "Flujos entre clusters (todos los periodos)", 
+       edge_width = "Frecuencia", color = "Clúster")
+
+
+
+# Lista de periodos únicos
+periodos <- unique(flujos$periodo)
+
+# Función para generar gráfico de un periodo
+grafico_por_periodo <- function(periodo) {
+  flujos_per <- flujos %>% filter(periodo == !!periodo)
+  
+  # Si no hay flujos para ese periodo, devuelve NULL
+  if(nrow(flujos_per) == 0) return(NULL)
+  
+  edges <- flujos_per %>%
+    rename(from = cluster_origen, to = cluster_destino) %>%
+    mutate(from = as.character(from), to = as.character(to))
+  
+  nodos <- data.frame(name = unique(c(edges$from, edges$to)))
+  
+  grafo <- tbl_graph(nodes = nodos, edges = edges, directed = TRUE)
+  
+  ggraph(grafo, layout = "fr") +
+    geom_edge_link(aes(edge_width = freq), 
+                   arrow = arrow(length = unit(2, 'mm')), 
+                   end_cap = circle(2, 'mm')) +
+    geom_node_point(aes(color = name), size = 5) +
+    geom_node_text(aes(label = name), vjust = 1.2, size = 3) +
+    theme_graph() +
+    labs(title = paste("Periodo", periodo), 
+         edge_width = "Frecuencia", color = "Clúster")
+}
+
+# Generar gráficos y combinarlos
+graficos <- lapply(periodos, grafico_por_periodo)
+graficos <- graficos[!sapply(graficos, is.null)]
+
+# Combinar con patchwork
+wrap_plots(graficos, ncol = 2)
+
+library(visNetwork)
+library(igraph)
+
+# Crear grafo con igraph
+g <- graph_from_data_frame(d = edges, directed = TRUE, vertices = nodos)
+
+# Convertir a visNetwork
+visIgraph(g, layout = "layout_with_fr") %>%
+  visEdges(arrows = "to") %>%
+  visOptions(highlightNearest = TRUE, nodesIdSelection = TRUE)
+
+library(gganimate)
+
+jdf_sf_simple <- jdf_sf %>%
+  st_make_valid() %>%
+  st_simplify(dTolerance = 0.002)
+
+p_anim <- ggplot(jdf_sf_simple) +
+  geom_sf(aes(fill = as.factor(.data[[cluster_elegido]])), color = NA) +
+  scale_fill_viridis_d("Cluster") +
+  facet_wrap(~ AE) +
+  transition_states(tcode, transition_length = 1, state_length = 1) +
+  labs(title = "Quinquenio: {closest_state}")
+
+anim_save("evolucion_clusters.gif", p_anim, fps = 2, width = 800, height = 600)
+
+
+# Obtener último periodo
+ultimo <- max(jdf_sf$tcode)
+jdf_ultimo <- jdf_sf %>% dplyr::filter(tcode == ultimo)
+
+ggplot(jdf_ultimo) +
+  geom_sf(aes(fill = as.factor(.data[[cluster_elegido]])), color = NA) +
+  facet_wrap(~ AE) +
+  scale_fill_viridis_d("Cluster") +
   theme_minimal()
