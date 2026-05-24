@@ -103,10 +103,20 @@ ggplot(stats_diff, aes(x = reorder(variable, sd_iqr_ratio), y = sd_iqr_ratio)) +
   theme_minimal()
 
 # -----------------------------------------------------------------------
-# 2. ESTANDARIZACIÓN ROBUSTA
+# 2. YEO-JOHNSON Y ESTANDARIZACIÓN ROBUSTA
 # -----------------------------------------------------------------------
 # Uso de escalado robusto: mediana y RIC para manejar outliers
 # y alta heterogeneidad sectorial.
+
+
+library(recipes)
+
+rec <- recipe(data) %>%
+  step_YeoJohnson(all_of(vars_interes)) %>%
+  prep(training = data)
+
+# Data transformada, el resto de columnas (NOMGEO, AE, etc.) no se tocan
+data_trans <- bake(rec, new_data = data)
 
 robust_scale <- function(x) {
   iqr <- IQR(x, na.rm = TRUE)
@@ -115,7 +125,7 @@ robust_scale <- function(x) {
 }
 
 # Aplicar
-data_scaled <- data %>%
+data_scaled <- data_trans %>%
   dplyr::select(all_of(vars_interes)) %>%
   dplyr::mutate(dplyr::across(dplyr::everything(), robust_scale))
 
@@ -903,6 +913,7 @@ silhouette_results <- purrr::map2(resultados_hclust, names(resultados_hclust), f
 # Dado que DBSCAN mostró un grupo denso y varios satélites, 
 # GMM podría modelar mejor esas formas alargadas o irregulares.
 
+
 # Paquetes necesarios
 library(mclust)       # para GMM
 library(kernlab)       # para specc (clustering espectral)
@@ -1072,13 +1083,153 @@ write.csv(sil_summary, "siluetas_avanzadas.csv", row.names = FALSE)
 write.csv(ari_summary, "ari_comparacion.csv", row.names = FALSE)
 saveRDS(resultados_avanzados, "resultados_avanzados.rds")
 
+# Para 2003
+modelo_gmm_auto <- resultados_avanzados[["2003"]]$gmm_auto
+if (!is.null(modelo_gmm_auto)) {
+  print(modelo_gmm_auto$G)            # número de clústeres seleccionado
+  print(table(modelo_gmm_auto$classification))  # tamaño de los grupos
+  sil_auto <- silhouette(modelo_gmm_auto$classification, dist(X))
+  cat("Silueta GMM auto:", mean(sil_auto[, 3]), "\n")
+}
+
+
+
+### Mezcla t-Students
+
+tmm_clustering_robust <- function(data, vars, G = 4) {
+  # Extraer variables de forma segura (base R)
+  X <- as.matrix(data[, vars, drop = FALSE])
+  
+  # Opción 1: teigen (si está instalado, con inicialización robusta)
+  if (requireNamespace("teigen", quietly = TRUE)) {
+    cat("  Intentando teigen...\n")
+    fit_tei <- tryCatch(
+      teigen::teigen(X, Gs = G, models = "TEV", scale = FALSE, init = "hierarchical"),
+      error = function(e) NULL
+    )
+    if (!is.null(fit_tei) && length(unique(fit_tei$classification)) > 1) {
+      clusters <- as.factor(fit_tei$classification)
+      data$cluster_tmm <- clusters
+      dist_mat <- dist(X)
+      sil <- silhouette(as.integer(clusters), dist_mat)
+      mean_sil <- mean(sil[, 3])
+      cat(sprintf("  teigen OK. Silueta media: %.4f\n", mean_sil))
+      return(list(model = fit_tei, data = data, silhouette = sil, mean_silhouette = mean_sil))
+    }
+  }
+  
+  # Opción 2: Mclust con distribución t y modelo EII (esférico, igual volumen)
+  cat("  Intentando Mclust T-EII...\n")
+  m_eii <- tryCatch(
+    Mclust(X, G = G, modelNames = "EII", distribution = "t"),
+    error = function(e) NULL
+  )
+  if (!is.null(m_eii) && nlevels(as.factor(m_eii$classification)) > 1) {
+    clusters <- as.factor(m_eii$classification)
+    data$cluster_tmm <- clusters
+    dist_mat <- dist(X)
+    sil <- silhouette(as.integer(clusters), dist_mat)
+    mean_sil <- mean(sil[, 3])
+    cat(sprintf("  Mclust T-EII OK. Silueta media: %.4f\n", mean_sil))
+    return(list(model = m_eii, data = data, silhouette = sil, mean_silhouette = mean_sil))
+  }
+  
+  # Opción 3: GMM gaussiano EII como último recurso
+  cat("  Intentando GMM EII (fallback)...\n")
+  m_gmm <- tryCatch(
+    Mclust(X, G = G, modelNames = "EII"),
+    error = function(e) NULL
+  )
+  if (!is.null(m_gmm) && nlevels(as.factor(m_gmm$classification)) > 1) {
+    clusters <- as.factor(m_gmm$classification)
+    data$cluster_tmm <- clusters
+    dist_mat <- dist(X)
+    sil <- silhouette(as.integer(clusters), dist_mat)
+    mean_sil <- mean(sil[, 3])
+    cat(sprintf("  GMM EII OK. Silueta media: %.4f\n", mean_sil))
+    return(list(model = m_gmm, data = data, silhouette = sil, mean_silhouette = mean_sil))
+  }
+  
+  # Nada funcionó
+  warning("Ningún modelo de mezcla pudo ajustarse.")
+  return(list(model = NULL, data = data, silhouette = NULL, mean_silhouette = NA))
+}
+
+for (anio in names(resultados_hclust)) {
+  cat("\n========== Año:", anio, "==========\n")
+  res <- resultados_hclust[[anio]]
+  if (is.null(res)) next
+  df <- res$df_actualizado
+  
+  tmm_res <- tmm_clustering_robust(df, vars = vi, G = 4)
+  
+  if (is.null(resultados_avanzados[[anio]])) {
+    resultados_avanzados[[anio]] <- list()
+  }
+  
+  resultados_avanzados[[anio]]$tmm_model      <- tmm_res$model
+  resultados_avanzados[[anio]]$tmm_clusters   <- tmm_res$data$cluster_tmm
+  resultados_avanzados[[anio]]$siluetas$tmm   <- tmm_res$silhouette
+  resultados_avanzados[[anio]]$medias_sil$tmm <- tmm_res$mean_silhouette
+  
+  # Actualizar el data.frame principal dentro de la lista
+  if (!is.null(resultados_avanzados[[anio]]$data_actualizado)) {
+    resultados_avanzados[[anio]]$data_actualizado$cluster_tmm <- 
+      tmm_res$data$cluster_tmm
+  }
+}
+
+
+for (anio in names(resultados_avanzados)) {
+  cl_tmm <- resultados_avanzados[[anio]]$tmm_clusters
+  cl_gmm <- resultados_avanzados[[anio]]$data_actualizado$cluster_gmm
+  if (!is.null(cl_tmm) && !is.null(cl_gmm)) {
+    ari <- adjustedRandIndex(cl_tmm, cl_gmm)
+    cat(anio, "ARI TMM vs GMM:", round(ari, 3), "\n")
+  }
+}
+
+### mezcla t asimetrícas
+
+install.packages("mixture")      # stpcm – 14 modelos parsimoniosos
+
+library(mixture)
+library(cluster)
+
+# Datos de prueba (2003)
+df_2003 <- resultados_avanzados[["2003"]]$data_actualizado
+X <- as.matrix(df_2003[, vi])
+
+# Ajustar todos los modelos parsimoniosos skew-t para G = 4
+# (puedes cambiar G o usar un rango luego)
+modelo_mix <- stpcm(
+  data      = X,
+  G         = 4,          # número de componentes
+  mnames    = NULL,       # ajusta los 14 modelos y elige el mejor por BIC
+  start     = 2,          # 2 = inicialización con k‑means
+  nmax      = 1000,
+  atol      = 1e-8,
+  pprogress = TRUE
+)
+
+# Resumen del mejor modelo encontrado
+summary(modelo_mix)
+
+# Asignación de clústeres (MAP)
+clusters_mix <- modelo_mix$map
+table(clusters_mix)
+
+# Silueta
+sil_mix <- silhouette(clusters_mix, dist(X))
+mean(sil_mix[, 3])
+
 
 # 10. ESTADÍSTICAS DESCRIPTIVAS POR CLUSTER
 # -----------------------------------------
 
 summarize_clusters <- function(data, 
                                vars, 
-                               cluster_col = "cluster_gmm", 
+                               cluster_col = "cluster_tmm", 
                                year_label = NULL) {
   
   # Verificar que la columna de clusters existe
@@ -1128,9 +1279,9 @@ summarize_clusters <- function(data,
 lista_resumenes <- map2(resultados_avanzados, names(resultados_avanzados), function(res, anio) {
   if (is.null(res)) return(NULL)
   
-  # Verificar que la columna cluster_spec existe
-  if (!"cluster_gmm" %in% colnames(res$data_actualizado)) {
-    warning("La columna 'cluster_spec' no existe en el año ", anio)
+  # Verificar que la columna cluster_ existe
+  if (!"cluster_tmm" %in% colnames(res$data_actualizado)) {
+    warning("La columna 'cluster_tmm' no existe en el año ", anio)
     return(NULL)
   }
   
@@ -1163,6 +1314,44 @@ resumen_2003 %>%
 
 # Guardar resumen consolidado
 write_csv(resumen_total, "resumen_clusters_todos_anos.csv")
+
+library(purrr)
+library(dplyr)
+
+lista_resumenes_tmm <- map2(resultados_avanzados, names(resultados_avanzados), function(res, anio) {
+  if (is.null(res)) return(NULL)
+  
+  # Verificar que la columna cluster_tmm existe
+  if (!"cluster_tmm" %in% colnames(res$data_actualizado)) {
+    warning("La columna 'cluster_tmm' no existe en el año ", anio)
+    return(NULL)
+  }
+  
+  summarize_clusters(
+    data = res$data_actualizado,
+    vars = vi,
+    cluster_col = "cluster_tmm",
+    year_label = anio
+  )
+})
+
+# Unir todos los años
+resumen_tmm_total <- bind_rows(lista_resumenes_tmm)
+
+# Ejemplo: ver el año 2003 formateado
+library(kableExtra)
+resumen_tmm_total %>%
+  filter(anio == "2003") %>%
+  mutate(across(c(media, mediana, de, q1, q3), ~ round(., 2))) %>%
+  kable(col.names = c("Año", "Cluster", "N", "Variable", "Media", "Mediana", "DE", "Q1", "Q3"),
+        caption = "Resumen por cluster TMM - Año 2003") %>%
+  kable_styling("striped", full_width = FALSE) %>%
+  collapse_rows(columns = 1:3, valign = "top")
+
+
+
+
+
 
 # Guardar un archivo por año (opcional)
 # walk2(lista_resumenes, names(lista_resumenes), function(df, anio) {
@@ -3702,7 +3891,7 @@ library(patchwork)
 # 1. Versión sin título ni caption de p1
 p1_mod <- p1 +
   labs(title = NULL, caption = NULL) +
-  theme(plot.margin = margin(10, 15, 10, 10))
+  theme(plot.margin = margin(15, 15, 15, 15))
 
 # 2. Quitar cualquier caption residual que pudiera tener p2 (va en blanco)
 p2_mod <- p2 +
@@ -3822,6 +4011,9 @@ flujos <- jdf_tabla %>%
 flujos_agregados <- flujos %>%
   group_by(cluster_origen, cluster_destino) %>%
   summarise(freq = sum(freq), .groups = "drop")
+
+flujos_agregados
+
 
 library(tidygraph)
 library(ggraph)
