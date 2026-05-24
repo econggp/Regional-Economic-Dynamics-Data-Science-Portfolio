@@ -88,7 +88,7 @@ Proprietary algorithm measuring regional knowledge-diffusion capacity through:
 ---
 
 ### 3. Industrial Recomposition Tracker
-**Files**: [`conglomerados.R`](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/186c20bc2e955e38fb9f47ac4a67dc6c97425ea2/conglomerados.R), [`análisis_clasificación.R`](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/econggp-conglomerados/an%C3%A1lisis_clasificaci%C3%B3n.R)
+**Files**: [`conglomerados.R`](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/econggp-conglomerados/conglomerados.R), [`análisis_clasificación.R`](https://github.com/econggp/Regional-Economic-Dynamics-Data-Science-Portfolio/blob/econggp-conglomerados/an%C3%A1lisis_clasificaci%C3%B3n.R)
 
 Hybrid ML approach combining interpretability with predictive power:
 
